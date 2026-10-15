@@ -1,0 +1,29 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<script>try{document.documentElement.dataset.theme=localStorage.memTheme||"dark"}catch(e){document.documentElement.dataset.theme="dark"}</script><title>MEMORA — Privacy-Preserving Organizational Intelligence</title>
+<link rel="stylesheet" href="css/style.css"><link rel="stylesheet" href="css/responsive.css"></head><body>
+<div id="demo">DEMO ENVIRONMENT · Prototype — Data shown is simulated.</div>
+<div id="app">
+<aside id="side"><div class="brand"><b>MEMORA</b><button id="collapse" title="Collapse">☰</button></div><nav id="nav"></nav>
+<div class="sfoot"><div><i class="dot g"></i> System Status: Operational</div><div class="muted">Asha Verma · Northfield Org</div><div><a href="#settings">Profile</a> · <a href="#" id="logout">Logout</a></div></div></aside>
+<div id="main"><header><button id="burger">☰</button><div><div class="crumb" id="crumb"></div><h1 id="ptitle"></h1></div>
+<button id="gsearch" class="search">Search meetings, decisions, people… <kbd>Ctrl K</kbd></button>
+<span class="b g">● SECURE</span><button class="ic" id="theme" title="Toggle light/dark theme">☀</button><button class="ic" id="notif" title="Notifications">🔔</button><button class="ic" id="help" title="Help">?</button><span class="av">AV</span></header>
+<main id="view"></main></div></div>
+<button id="aibtn">✦ Ask Organizational AI</button><section id="ai" hidden></section>
+<div id="overlay" hidden></div><div id="toast"></div>
+<script src="js/data.js"></script>
+<!-- Local processing pipeline — loaded as classic scripts (work on file:// without a server) -->
+<!-- Load order: dependencies first, then consumers, then the bridge that wires them into app.js -->
+<script src="js/audioStore.js"></script>
+<script src="js/ffmpegPipeline.js"></script>
+<script src="js/vadProcessor.js"></script>
+<script src="js/whisperEngine.js"></script>
+<script src="js/translationEngine.js"></script>
+<script src="js/meetingUpload.js"></script>
+<script src="js/liveTranslation.js"></script>
+<!-- app.js must come AFTER data.js and the processing modules, but BEFORE appModules.js -->
+<script src="js/app.js"></script>
+<!-- appModules.js patches window.P and re-renders if on a new page -->
+<script src="js/appModules.js"></script>
+</body></html>
+
