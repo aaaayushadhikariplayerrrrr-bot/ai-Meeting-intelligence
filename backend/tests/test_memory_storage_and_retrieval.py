@@ -783,7 +783,8 @@ def test_alembic_migration_upgrade_and_downgrade():
         temp_db_path = f.name
 
     try:
-        cfg = Config("backend/alembic.ini")
+        ini_path = "alembic.ini" if os.path.exists("alembic.ini") else "backend/alembic.ini"
+        cfg = Config(ini_path)
         clean_url = "sqlite:///" + temp_db_path.replace("\\", "/")
         cfg.set_main_option("sqlalchemy.url", clean_url)
 
