@@ -12,7 +12,7 @@ Traditional meeting transcription tools are typically single-meeting note-takers
 1. **Cross-Meeting Memory**: Decisions and action items do not exist in isolation. MEMORA links decisions chronologically across meetings, tracks whether subsequent meetings supersede or contradict prior commitments, and alerts users to conflicting mandates.
 2. **Privacy-Safe Ingestion & Raw Audio Deletion**: Under strict privacy policies, raw media (voice/video recordings) contains sensitive biometric identifiers. MEMORA automatically unlinks and deletes raw audio and intermediate WAVs immediately upon verified transcript persistence, preserving only timestamped text segments, PII-redacted derived versions, and vector embeddings.
 3. **Multilingual & Code-Switched Support**: Designed to handle code-switched Hindi-English (Hinglish) discussions using Faster-Whisper on NVIDIA RTX GPUs, alongside semantic multilingual vector embeddings (`multilingual-e5-small`) running locally on CPU.
-4. **Verifiable Evidence Navigation**: Every decision, action item, conflict, and Ask AI answer is grounded in exact transcript segments with millisecond timestamps. Clicking a citation jumps directly to the cited timestamp in the privacy-safe transcript.
+4. **Verifiable Evidence Navigation**: Every decision, action item, conflict, and Ask AI answer is grounded in exact transcript segments with segment-level timestamps. Clicking a citation jumps directly to the cited timestamp in the privacy-safe transcript.
 
 ---
 
@@ -149,7 +149,7 @@ Open your browser at `http://localhost:5173`.
 * **Pre-Transcription**: Raw media is streamed safely to tenant-isolated storage folders (`data/storage/<meeting_id>/`).
 * **Post-Transcription Deletion**: Once transcription completes and segments are safely persisted in SQLite, `AUTO_DELETE_RAW_POST_TRANSCRIPTION=True` automatically unlinks and removes raw media files and intermediate WAVs from disk.
 * **Audit Trail**: Every deletion operation logs an unalterable `AuditLog` entry recording timestamp, asset ID, user ID, and `deletion_type="application_unlink"`.
-* **Zero Cloud Leakage**: All processing (ASR, redaction, embedding generation, vector storage, and search) runs strictly on local hardware. No audio, transcripts, or queries are sent to external cloud APIs.
+* **Local Inference & Zero Cloud API Dependence**: Core processing (speech recognition, PII redaction, embedding generation, vector storage, and hybrid search) runs strictly on local workstation hardware. No audio, transcripts, or queries are sent to external cloud LLM APIs. (Note: YouTube stream ingestion connects to YouTube to fetch authorized video streams if that input method is explicitly selected).
 
 ---
 
@@ -177,11 +177,13 @@ venv\Scripts\python.exe -m alembic check
 
 ## 9. Known Boundaries & Limitations
 
-1. **Deterministic Fallback vs. Generative LLM**: In the absence of a local Ollama or high-VRAM LLM installation, MEMORA employs a deterministic rule-based answer generator. It synthesizes answers strictly from retrieved citation chunks rather than generating freeform synthetic prose.
-2. **Application-Level Deletion**: Audio deletion unlinks files via OS calls (`Path.unlink()`). It does not perform multi-pass cryptographic disk sanitization or forensic drive shredding.
-3. **Regex PII Coverage**: Redaction rules target standard PII (Aadhaar, PAN, SSN, emails, phones, API keys, tokens). Contextual or colloquial mentions of private data not matching known formats may require manual redaction review.
-4. **Speaker Diarization**: When speaker diarization hardware/models are unconfigured, speaker metadata defaults honestly to `null` rather than generating fabricated speaker labels.
-5. **SQLite Single-Writer Concurrency**: SQLite with WAL mode supports unlimited concurrent readers with a serialized writer queue (backed by a 30-second busy timeout). High-volume multi-worker workloads should consider PostgreSQL for multi-writer scaling.
+1. **Deterministic Fallback vs. Generative LLM**: In the absence of a local Ollama or high-VRAM LLM installation, MEMORA employs an honest deterministic rule-based answer generator. It synthesizes answers strictly from retrieved citation chunks rather than generating freeform synthetic prose.
+2. **Application-Level Deletion vs. Forensic Sanitization**: Audio deletion unlinks files via standard OS calls (`Path.unlink()`). It does not perform multi-pass cryptographic disk sanitization or DoD 5220.22-M drive shredding.
+3. **Regex PII Coverage**: Redaction rules target standard structured PII (Aadhaar, PAN, SSN, emails, phones, API keys, tokens). Unstructured contextual mentions of private data not matching known patterns may require manual redaction review.
+4. **Speaker Diarization**: When speaker diarization models are unconfigured, speaker metadata defaults honestly to `null` (`NullDiarizationProvider`) rather than generating fabricated speaker labels.
+5. **Multilingual ASR Scope**: Faster-Whisper provides multilingual recognition for English, Hindi, and Hinglish. Synthetic test suites pass, but real-world accuracy will naturally vary with heavy regional accents, background noise, and overlapping speakers.
+6. **Local Deployment vs. Public Production**: MEMORA is hardened for local demonstration and intranet team environments. Deployment on the public internet requires an enterprise reverse proxy (e.g. Nginx or Caddy) with TLS termination, centralized Redis for distributed rate limiting, and PostgreSQL for horizontal multi-writer scaling.
+7. **SQLite Single-Writer Concurrency**: SQLite in WAL mode permits unlimited concurrent readers, while write transactions are queued sequentially backed by a 30-second busy timeout. High-concurrency multi-worker workloads should consider PostgreSQL for multi-writer scaling.
 
 ---
 
