@@ -1,176 +1,195 @@
-# Multilingual Meeting Intelligence System
+# MEMORA: Multilingual Meeting Intelligence & Organizational Memory System
 
-A privacy-aware, multilingual AI Meeting Intelligence and Organizational Memory System engineered to ingest, transcribe, analyze, and retain knowledge across meetings conducted in English, Hindi, Gujarati, and Hinglish (code-switched conversations).
-
----
-
-## 1. Verified Hardware & Software Environment
-
-| Component | Verified Specification |
-| :--- | :--- |
-| **Operating System** | Windows 11 (64-bit) |
-| **CPU** | AMD Ryzen 7 260 w/ Radeon 780M Graphics (8 Cores, 16 Logical Processors) |
-| **Memory (RAM)** | 16 GB Physical RAM (15.31 GiB usable) |
-| **Storage** | 812+ GB Free Space on Drive C: |
-| **GPU** | NVIDIA GeForce RTX 5060 Laptop GPU (8,151 MiB VRAM) |
-| **NVIDIA Driver** | 621.01 (CUDA UMD 13.5) |
-| **PyTorch & CUDA** | PyTorch 2.11.0+cu128 (Active CUDA 12.8 device acceleration) |
-| **FFmpeg & FFprobe** | FFmpeg 9.0.2-full_build (Gyan.dev build with libwhisper & audio decoders) |
-| **Python** | Python 3.13.16 (`C:\Users\gurpr\AppData\Local\Programs\Python\Python313\python.exe`) |
-| **Node.js & npm** | Node.js v26.13.1 (LTS) & npm 11.20.0 |
-| **Ollama** | Not installed yet (reserved for Phase 5 LLM pipeline) |
+A privacy-first, locally hosted meeting intelligence and cross-meeting organizational memory platform designed for English, Hindi, and Hinglish (code-switched) business conversations.
 
 ---
 
-## 2. Project Directory Structure
+## 1. Problem Statement & Technical Novelty
 
-```text
-Multilingual Meeting Intelligence System/
-├── backend/
-│   ├── alembic/                       # Alembic database migrations
-│   ├── app/
-│   │   ├── api/
-│   │   │   ├── endpoints/
-│   │   │   │   ├── health.py          # /health & /api/v1/health endpoints
-│   │   │   │   ├── media.py           # Upload, YouTube, Meeting, Job & Deletion endpoints
-│   │   │   │   └── transcription.py   # Start transcription, poll jobs, retrieve segments, HW diagnostics
-│   │   │   ├── deps.py                # Tenant isolation & dev user dependencies
-│   │   │   └── router.py              # Main API router aggregator
-│   │   ├── core/
-│   │   │   └── config.py              # Storage paths, upload limits, ASR model & GPU compute settings
-│   │   ├── database/
-│   │   │   ├── base.py                # SQLAlchemy 2.0 DeclarativeBase
-│   │   │   └── session.py             # SQLite engine with PRAGMA foreign_keys=ON
-│   │   ├── models/                    # Domain ORM models (Meeting, MediaAsset, Transcript, TranscriptSegment)
-│   │   ├── schemas/                   # Pydantic schemas (MediaAssetResponse, MeetingResponse)
-│   │   ├── services/                  # Modular services
-│   │   │   ├── audio_extraction.py    # FFmpeg audio normalization (16kHz mono WAV)
-│   │   │   ├── job_manager.py         # ProcessingJob status & progress tracking
-│   │   │   ├── lifecycle.py           # Safe raw media deletion & AuditLog recording
-│   │   │   ├── media_metadata.py      # FFprobe metadata extraction (duration, codecs, fps)
-│   │   │   ├── media_storage.py       # Traversal-safe streaming storage & SHA-256
-│   │   │   ├── media_validation.py    # Extensions, FFprobe content checks, YouTube URLs
-│   │   │   ├── youtube_ingestion.py   # yt-dlp stream extraction with authorization check
-│   │   │   └── transcription/         # Phase 4 ASR Speech Recognition Engine
-│   │   │       ├── base.py            # ASREngine ABC, ASRResult, ASRSegment, TranscriptionOptions
-│   │   │       ├── chunking.py        # Long-audio chunk calculation, WAV slicing, overlap deduplication
-│   │   │       ├── diarization.py     # DiarizationProvider ABC & NullDiarizationProvider (honest, no fake IDs)
-│   │   │       ├── faster_whisper_engine.py # Faster-Whisper + CTranslate2 on NVIDIA GPU & CPU fallback
-│   │   │       ├── gpu_manager.py     # Dynamic Windows DLL discovery (torch/lib + CUDA) & VRAM monitoring
-│   │   │       ├── job_handler.py     # Background transcription worker & versioned DB persistence
-│   │   │       ├── manager.py         # Singleton ASR lifecycle & memory management
-│   │   │       └── specialist_adapters.py # Stubs for AI4Bharat IndicConformer & Hinglish-Apex
-│   │   └── main.py                    # FastAPI entrypoint, CORS & routes
-│   ├── tests/
-│   │   ├── conftest.py                # In-memory test DB fixture with foreign keys
-│   │   ├── test_database.py           # 12 schema & relationship tests
-│   │   ├── test_health.py             # 4 health check & CORS tests
-│   │   ├── test_media_ingestion.py    # 11 media validation, extraction & upload tests
-│   │   ├── test_real_transcription_e2e.py # 2 live GPU acceleration & CPU fallback tests on RTX 5060
-│   │   └── test_transcription.py      # 12 ASR unit, persistence, versioning & API tests
-│   ├── venv/                          # Python 3.13 virtual environment
-│   ├── alembic.ini                    # Alembic configuration
-│   └── requirements.txt               # Backend dependencies (FastAPI, Faster-Whisper, CTranslate2, yt-dlp)
-├── frontend/
-│   ├── src/
-│   │   ├── services/
-│   │   │   └── api.ts                 # Typed API client (upload, YouTube, poll jobs, delete, transcribe)
-│   │   ├── types/
-│   │   │   └── index.ts               # TypeScript interfaces (Transcripts, Segments, HW Diagnostics)
-│   │   ├── App.css                    # Modern responsive styling for Ingestion & Transcript Hub
-│   │   ├── App.tsx                    # Ingestion Hub, Job Tracker, Transcript Viewer & Diagnostics
-│   │   ├── index.css
-│   │   └── main.tsx
-│   ├── package.json
-│   ├── vite.config.ts
-├── data/
-│   └── storage/                       # Secure local media & model storage
-├── docs/
-│   └── architecture.md                # System architecture, ERD & pipeline diagrams
-├── meeting_intelligence.db            # SQLite development database
-└── README.md                          # Runbook & documentation
-```
+Traditional meeting transcription tools are typically single-meeting note-takers: they transcribe audio into flat text, provide a high-level summary, and discard the relationship between meetings.
+
+**MEMORA** addresses four systemic shortcomings of modern meeting platforms:
+1. **Cross-Meeting Memory**: Decisions and action items do not exist in isolation. MEMORA links decisions chronologically across meetings, tracks whether subsequent meetings supersede or contradict prior commitments, and alerts users to conflicting mandates.
+2. **Privacy-Safe Ingestion & Raw Audio Deletion**: Under strict privacy policies, raw media (voice/video recordings) contains sensitive biometric identifiers. MEMORA automatically unlinks and deletes raw audio and intermediate WAVs immediately upon verified transcript persistence, preserving only timestamped text segments, PII-redacted derived versions, and vector embeddings.
+3. **Multilingual & Code-Switched Support**: Designed to handle code-switched Hindi-English (Hinglish) discussions using Faster-Whisper on NVIDIA RTX GPUs, alongside semantic multilingual vector embeddings (`multilingual-e5-small`) running locally on CPU.
+4. **Verifiable Evidence Navigation**: Every decision, action item, conflict, and Ask AI answer is grounded in exact transcript segments with millisecond timestamps. Clicking a citation jumps directly to the cited timestamp in the privacy-safe transcript.
 
 ---
 
-## 3. Supported Media Formats & ASR Pipeline
+## 2. Core Capabilities
 
-- **Audio Formats**: WAV, MP3, M4A, FLAC
-- **Video Formats**: MP4, MKV, MOV, WebM
-- **YouTube Streams**: Valid YouTube URLs (`youtube.com`, `youtu.be`) with explicit user authorization confirmation.
-- **ASR Audio Normalization Standard**:
-  - Container: WAV
-  - Codec: `pcm_s16le`
-  - Sample Rate: 16,000 Hz (16 kHz)
-  - Channels: 1 (Mono)
-- **Supported Languages**:
-  - English (`en`), Hindi (`hi`), Gujarati (`gu`), Hinglish (`hi-en` / code-switching).
-  - Preserves original spoken language without auto-translating.
+* **Multi-Format Ingestion**: Upload audio (`.wav`, `.mp3`, `.m4a`, `.aac`, `.flac`, `.ogg`) or video (`.mp4`, `.webm`, `.mov`, `.mkv`), or ingest authorized YouTube streams. Audio is automatically extracted and normalized to 16 kHz mono WAV via FFmpeg.
+* **GPU-Accelerated Transcription**: Accelerated Faster-Whisper (`large-v3-turbo` with CUDA float16/int8 fallback) with custom chunking, overlap deduplication, and progress callbacks.
+* **Dual-Layer Privacy Redaction**: Automatic rule-based and regex PII detection redaction (Aadhaar IDs, PAN cards, credit cards, emails, phone numbers, API keys, JWT tokens) while strictly preserving legal conditioning words (`shall`, `must not`, `unless`, `subject to`).
+* **Role-Based Access Control**:
+  * `ORG_ADMIN`: Full access to original audio management, original transcripts, cleaned/redacted versions, and system diagnostics.
+  * `MEMBER`: Access strictly limited to privacy-safe (redacted) transcripts, meeting intelligence, and cross-meeting organizational memory.
+* **Cross-Meeting Decision & Commitment Lineage**:
+  * **Decision History**: Track Active, Superseded, and Revoked decisions with explicit lineage trees.
+  * **Commitment Tracking**: Monitor action items across meetings with overdue alerts, owner filters, and meeting origin links.
+  * **Potential Conflicts**: Heuristic and evidence-backed detection of contradictory decisions across meetings.
+  * **Unresolved Questions**: Track unanswered inquiries from past meetings until explicitly resolved.
+* **Ask AI & Hybrid Retrieval**:
+  * Hybrid retrieval combining BM25/SQLite FTS5 full-text keyword search and dense semantic vector similarity (`multilingual-e5-small`).
+  * Honest provider attribution (deterministic rule-based synthesis when local generative LLMs are unavailable, abstaining with `INSUFFICIENT_EVIDENCE` when queries lack grounded proof).
 
 ---
 
-## 4. API Endpoints (Phases 3 & 4)
+## 3. Technology Stack
 
-| Method | Endpoint | Description |
+### Backend
+* **Language & Runtime**: Python 3.13 (64-bit)
+* **API Framework**: FastAPI, Pydantic v2, Starlette, Uvicorn
+* **Database & ORM**: SQLite 3 with WAL mode (`PRAGMA journal_mode=WAL`), FTS5 full-text search triggers, SQLAlchemy 2.0 Declarative ORM, Alembic migrations
+* **Speech Recognition**: Faster-Whisper / CTranslate2 on NVIDIA CUDA 12.8, FFmpeg / FFprobe
+* **Embeddings & Vector Search**: HuggingFace `intfloat/multilingual-e5-small` (384-dimensional dense vectors), PyTorch CPU inference, NumPy cosine similarity
+* **Authentication & Security**: Argon2id password hashing, JWT Bearer tokens with per-user `token_version` revocation on logout, rate-limiting on authentication endpoints
+
+### Frontend
+* **Framework**: React 19, TypeScript, Vite
+* **UI Components & Icons**: Lucide React, vanilla modern CSS with design tokens
+* **State & Networking**: Custom React Context (`AuthContext`), Fetch API with `AbortController` cancellation for tenant isolation
+
+---
+
+## 4. Hardware & Software Requirements
+
+| Component | Minimum Specification | Verified System |
 | :--- | :--- | :--- |
-| `POST` | `/api/v1/transcription/start/{meeting_id}` | Start asynchronous multilingual transcription on GPU |
-| `GET` | `/api/v1/transcription/{meeting_id}` | Retrieve versioned transcripts and timestamped segments |
-| `GET` | `/api/v1/transcription/jobs/{job_id}` | Poll transcription job progress (0-100%) and error state |
-| `GET` | `/api/v1/transcription/hardware/diagnostics` | Inspect live GPU, VRAM, CTranslate2 CUDA support & active model |
-| `POST` | `/api/v1/media/upload` | Upload audio/video file with background 16kHz mono normalization |
-| `POST` | `/api/v1/media/youtube` | Ingest YouTube meeting stream via `yt-dlp` |
-| `GET` | `/api/v1/media/meetings` | List meetings with media assets and processing jobs |
-| `GET` | `/api/v1/media/meetings/{id}` | Get specific meeting details |
-| `GET` | `/api/v1/media/jobs/{id}` | Poll media ingestion job status and progress percentage |
-| `DELETE` | `/api/v1/media/assets/{id}` | Safely delete raw media from disk and record audit log |
-| `GET` | `/health` | System health check and database connectivity |
+| **Operating System** | Windows 10/11 or Ubuntu 22.04 LTS | Windows 11 (64-bit) |
+| **CPU** | 4 Cores, 8 Threads (x86_64) | AMD Ryzen 7 260 (8 Cores, 16 Threads) |
+| **RAM** | 16 GB System Memory | 16 GB DDR5 |
+| **GPU (ASR)** | NVIDIA GPU with 6+ GB VRAM & CUDA compute capability 8.0+ | NVIDIA GeForce RTX 5060 Laptop (8 GB VRAM) |
+| **Python** | Python 3.11 – 3.13 | Python 3.13.16 |
+| **Node.js** | Node.js v20+ & npm 10+ | Node.js v26.13.1 & npm 11.20.0 |
+| **FFmpeg** | FFmpeg 6.0+ with ffprobe in PATH | FFmpeg 9.0.2 Gyan Full Build |
 
 ---
 
-## 5. How to Run Locally
+## 5. Quick Start & Setup Instructions
 
-### 1. Start the Backend API
+### Step 1: Clone Repository & Virtual Environment
+```bash
+# Clone the repository
+git clone <repo-url>
+cd "Multilingual Meeting Intelligence System"
 
-```powershell
-# From project root
-.\backend\venv\Scripts\python.exe -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000 --reload
+# Setup Python Virtual Environment in backend
+cd backend
+python -m venv venv
+venv\Scripts\activate   # On Linux/macOS: source venv/bin/activate
+pip install -r requirements.txt
 ```
 
-- **Health Check**: [http://127.0.0.1:8000/health](http://127.0.0.1:8000/health)
-- **Swagger Docs**: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
-- **ASR Diagnostics**: [http://127.0.0.1:8000/api/v1/transcription/hardware/diagnostics](http://127.0.0.1:8000/api/v1/transcription/hardware/diagnostics)
+### Step 2: Configure Environment Variables
+Copy `.env.example` to `.env` in both `backend` and `frontend`:
+```bash
+# In backend/
+copy .env.example .env   # On Linux/macOS: cp .env.example .env
 
-### 2. Start the Frontend Application
+# Generate a cryptographically secure 256-bit secret for backend/.env:
+python -c "import secrets; print('SECRET_KEY=' + secrets.token_hex(32))"
+# Update SECRET_KEY in backend/.env with the generated value
+```
 
-```powershell
+In `frontend/`:
+```bash
+cd ../frontend
+copy .env.example .env
+npm install
+```
+
+### Step 3: Run Database Migrations
+```bash
+# In backend/ (with venv activated)
+python -m alembic upgrade head
+```
+
+### Step 4: Start the Backend & Frontend Servers
+
+**Terminal 1 — Backend (Port 8000)**:
+```bash
+cd backend
+venv\Scripts\activate
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+**Terminal 2 — Frontend (Port 5173)**:
+```bash
 cd frontend
-$env:PATH = "C:\Program Files\nodejs;" + $env:PATH
-npm.cmd run dev
+npm run dev
 ```
 
-- **Web App**: [http://localhost:5173](http://localhost:5173)
+Open your browser at `http://localhost:5173`.
 
 ---
 
-## 6. Verification & Test Suite
+## 6. How to Use the System
 
-Run all automated unit and hardware tests:
-
-```powershell
-$env:PYTHONPATH = "backend"
-.\backend\venv\Scripts\pytest.exe backend/tests -v
-```
-
-**Results (41 passed in 7.94s, 0 warnings)**:
-- **Database Architecture (12 passed)**: Multi-tenancy, foreign keys, cascades, multilingual segment timestamps, coexistence of original and cleaned transcript versions.
-- **Health & CORS (4 passed)**: Health endpoint, CORS headers, API v1 router.
-- **Media Ingestion (11 passed)**: Formats, YouTube validation, FFprobe inspection, 16kHz mono normalization, SHA-256 calculation, path traversal defense, safe raw deletion.
-- **Live GPU Acceleration & CPU Fallback (2 passed)**: Verified real model execution on NVIDIA GeForce RTX 5060 Laptop GPU with float16 precision and CPU fallback.
-- **ASR Architecture & Persistence (12 passed)**: Long audio chunk calculation, WAV slicing, overlap deduplication, version incrementation, null diarization provider, specialist adapter stubs, API start and retrieve.
+1. **Register / Login**:
+   * Create an account. An organization is created automatically (e.g. `Acme Corp`), and you are assigned `ORG_ADMIN`.
+2. **Upload Meeting**:
+   * Navigate to **Upload Meeting**. Select an audio or video file.
+   * Background extraction validates codecs, normalizes audio to 16 kHz mono WAV, and queues the transcription job.
+3. **View Transcripts & Intelligence**:
+   * Monitor live progress on the dashboard.
+   * View the original transcript (admin only) or privacy-redacted transcript.
+   * Review structured topics, executive summaries, decisions, action items, and risks.
+4. **Explore Cross-Meeting Intelligence**:
+   * Switch to **Cross-Meeting Intelligence** to review decision timelines, supersede decisions, track open commitments, and inspect conflict warnings.
+5. **Ask AI**:
+   * Switch to **Organizational Memory** -> **Ask AI**.
+   * Ask natural-language questions across past meetings (e.g., *"What did we decide about database indexing?"*).
+   * Review citations and click to navigate to the exact transcript timestamp.
 
 ---
 
-## 7. Next Recommended Phase
+## 7. Privacy, Consent & Media Retention Policy
 
-**Phase 5: Intelligence & Extraction Pipeline**
-- Ollama local LLM integration for meeting summaries, topics, decisions, action items with owners and deadlines, risks, and unresolved questions.
+* **Pre-Transcription**: Raw media is streamed safely to tenant-isolated storage folders (`data/storage/<meeting_id>/`).
+* **Post-Transcription Deletion**: Once transcription completes and segments are safely persisted in SQLite, `AUTO_DELETE_RAW_POST_TRANSCRIPTION=True` automatically unlinks and removes raw media files and intermediate WAVs from disk.
+* **Audit Trail**: Every deletion operation logs an unalterable `AuditLog` entry recording timestamp, asset ID, user ID, and `deletion_type="application_unlink"`.
+* **Zero Cloud Leakage**: All processing (ASR, redaction, embedding generation, vector storage, and search) runs strictly on local hardware. No audio, transcripts, or queries are sent to external cloud APIs.
+
+---
+
+## 8. Test Commands
+
+```bash
+# Run all backend tests (from backend/ directory):
+cd backend
+set PYTHONPATH=..;.
+venv\Scripts\python.exe -m pytest tests/ -v
+
+# Run frontend tests:
+cd frontend
+npm run test
+
+# Run frontend production build:
+npm run build
+
+# Check database schema drift:
+cd backend
+venv\Scripts\python.exe -m alembic check
+```
+
+---
+
+## 9. Known Boundaries & Limitations
+
+1. **Deterministic Fallback vs. Generative LLM**: In the absence of a local Ollama or high-VRAM LLM installation, MEMORA employs a deterministic rule-based answer generator. It synthesizes answers strictly from retrieved citation chunks rather than generating freeform synthetic prose.
+2. **Application-Level Deletion**: Audio deletion unlinks files via OS calls (`Path.unlink()`). It does not perform multi-pass cryptographic disk sanitization or forensic drive shredding.
+3. **Regex PII Coverage**: Redaction rules target standard PII (Aadhaar, PAN, SSN, emails, phones, API keys, tokens). Contextual or colloquial mentions of private data not matching known formats may require manual redaction review.
+4. **Speaker Diarization**: When speaker diarization hardware/models are unconfigured, speaker metadata defaults honestly to `null` rather than generating fabricated speaker labels.
+5. **SQLite Single-Writer Concurrency**: SQLite with WAL mode supports unlimited concurrent readers with a serialized writer queue (backed by a 30-second busy timeout). High-volume multi-worker workloads should consider PostgreSQL for multi-writer scaling.
+
+---
+
+## 10. Troubleshooting & FAQ
+
+* **CUDA Out of Memory during Transcription**:
+  Ensure `ASR_NUM_WORKERS=1` in `backend/app/core/config.py`. Faster-Whisper releases model memory when idle, and CPU thread limits (`ASR_CPU_THREADS=4`) prevent memory bloat.
+* **Missing DLL Errors on Windows (cublas64_12.dll)**:
+  MEMORA includes an automated dynamic DLL discovery mechanism in `backend/app/services/transcription/gpu_manager.py` that links active PyTorch CUDA libraries (`torch/lib`) into the Windows process search path. Ensure PyTorch with CUDA is installed in `backend/venv`.
+* **Database Locked Errors**:
+  SQLite WAL mode is enabled automatically. Verify that `PRAGMA busy_timeout=30000` is active in `backend/app/database/session.py`.
