@@ -296,6 +296,12 @@
   font-weight: 600;
 }
 
+.memory-provider-badge.gemini {
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.45);
+  color: #34d399;
+}
+
 .memory-provider-badge.deterministic {
   background: rgba(148, 163, 184, 0.12);
   border: 1px solid rgba(148, 163, 184, 0.3);

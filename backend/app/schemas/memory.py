@@ -30,6 +30,7 @@ class AbstentionStatus(str, Enum):
     MODEL_UNAVAILABLE = "MODEL_UNAVAILABLE"
     RETRIEVAL_UNAVAILABLE = "RETRIEVAL_UNAVAILABLE"
     ANSWER_SUPPORTED = "ANSWER_SUPPORTED"
+    NOT_ABSTAINED = "NOT_ABSTAINED"
 
 
 class Citation(BaseModel):
@@ -47,6 +48,41 @@ class Citation(BaseModel):
     language_codes: List[str] = Field(default_factory=list, description="Language codes represented in snippet")
 
     model_config = ConfigDict(from_attributes=True)
+
+    @property
+    def segment_id(self) -> Optional[str]:
+        return self.segment_ids[0] if self.segment_ids else self.chunk_id
+
+
+class EvidenceChunk(BaseModel):
+    """Evidence chunk for RAG context, compatible with test fixtures and runtime representations."""
+    meeting_id: str
+    segment_id: Optional[str] = None
+    chunk_text: Optional[str] = None
+    text: Optional[str] = None
+    speaker: Optional[str] = None
+    start_time: float = 0.0
+    end_time: float = 0.0
+    score: float = 0.0
+    meeting_title: str = "Meeting"
+    meeting_date: Optional[str] = None
+    source_version: Optional[str] = None
+    chunk_id: Optional[str] = None
+    organization_id: Optional[str] = None
+    segment_ids: List[str] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="allow", from_attributes=True)
+
+    def __init__(self, **data: Any):
+        super().__init__(**data)
+        if self.chunk_text and not self.text:
+            self.text = self.chunk_text
+        if self.segment_id and not self.chunk_id:
+            self.chunk_id = self.segment_id
+        if self.segment_id and not self.segment_ids:
+            self.segment_ids = [self.segment_id]
+        if self.chunk_id and not self.segment_ids:
+            self.segment_ids = [self.chunk_id]
 
 
 class EvidenceItem(BaseModel):

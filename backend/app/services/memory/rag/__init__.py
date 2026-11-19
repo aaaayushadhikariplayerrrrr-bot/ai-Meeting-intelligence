@@ -17,6 +17,7 @@ from app.services.memory.rag.providers import (
     AnswerProvider,
     DeterministicAnswerProvider,
     OllamaAnswerProvider,
+    GeminiAnswerProvider,
 )
 from app.services.memory.rag.verification import (
     CitationVerifier,
@@ -38,6 +39,7 @@ __all__ = [
     "AnswerProvider",
     "DeterministicAnswerProvider",
     "OllamaAnswerProvider",
+    "GeminiAnswerProvider",
     "CitationVerifier",
     "RAGEngine",
 ]

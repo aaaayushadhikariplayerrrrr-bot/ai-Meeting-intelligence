@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 def process_extraction_job_sync(
     job_id: str,
     ollama_extractor: Optional[Any] = None,
+    gemini_extractor: Optional[Any] = None,
     deterministic_extractor: Optional[Any] = None,
 ) -> None:
     """Synchronous background handler executing an intelligence extraction job."""
@@ -126,6 +127,7 @@ def process_extraction_job_sync(
                 allow_fallback=True,
                 persist=True,
                 ollama_extractor=ollama_extractor,
+                gemini_extractor=gemini_extractor,
                 deterministic_extractor=deterministic_extractor,
             )
         except SafeTranscriptRequiredError as stre:

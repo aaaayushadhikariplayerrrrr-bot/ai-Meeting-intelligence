@@ -214,10 +214,13 @@ def test_background_worker_concurrency_bounded():
     asyncio.run(_run())
 
 
-def test_hardware_status_response_cpu_info_diagnostics(client, db_session):
+def test_hardware_status_response_cpu_info_diagnostics(client, db_session, monkeypatch):
     """Test 10: Verify hardware diagnostics endpoint surfaces cpu_info without regression."""
     from backend.tests.conftest import make_auth_headers
     from app.models.identity import User
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "ENABLE_SYSTEM_DIAGNOSTICS", True)
 
     # Create super admin user
     super_admin = User(

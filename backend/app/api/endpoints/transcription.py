@@ -566,8 +566,15 @@ def get_hardware_diagnostics(
 ):
     """Inspect GPU, CUDA, CTranslate2, and active ASR engine readiness.
     
-    Protected platform-level diagnostics: requires global Super Admin privilege.
+    Protected platform-level diagnostics: requires global Super Admin privilege
+    AND developer configuration flag ENABLE_SYSTEM_DIAGNOSTICS=true.
     """
+    if not getattr(settings, "ENABLE_SYSTEM_DIAGNOSTICS", False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="System and hardware diagnostics are disabled.",
+        )
+
     gpu_info = check_gpu_hardware()
     ct2_supported, ct2_msg, ct2_types = check_ctranslate2_support()
     engine = get_asr_engine()

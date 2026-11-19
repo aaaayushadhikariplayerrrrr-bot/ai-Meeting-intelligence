@@ -25,6 +25,7 @@ from app.services.memory.rag.providers import (
     AnswerProvider,
     DeterministicAnswerProvider,
     OllamaAnswerProvider,
+    GeminiAnswerProvider,
 )
 from app.services.memory.structured_retrieval import (
     StructuredMemoryRetriever,

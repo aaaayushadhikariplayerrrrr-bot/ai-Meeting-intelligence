@@ -842,8 +842,10 @@ def test_cross_tenant_media_asset_deletion_integrity(
 
 # --- 6. Hardware Diagnostics Platform Authorization ---
 
-def test_hardware_diagnostics_requires_super_admin(client, regular_member_user, super_admin_no_membership, test_org_a):
-    """Verify hardware diagnostics is strictly restricted to global Super Admin."""
+def test_hardware_diagnostics_requires_super_admin(client, regular_member_user, super_admin_no_membership, test_org_a, monkeypatch):
+    """Verify hardware diagnostics is strictly restricted to global Super Admin and gated by ENABLE_SYSTEM_DIAGNOSTICS."""
+    from app.core.config import settings
+
     # 1. Anonymous returns 401
     r_anon = client.get("/api/v1/transcription/hardware/diagnostics")
     assert r_anon.status_code == 401
@@ -854,8 +856,14 @@ def test_hardware_diagnostics_requires_super_admin(client, regular_member_user, 
     assert r_member.status_code == 403
     assert "super administrator" in r_member.json()["detail"].lower()
 
-    # 3. Super admin succeeds
+    # 3. Super admin receives 403 when diagnostics are disabled by default
     super_headers = make_auth_headers(super_admin_no_membership)
+    r_disabled = client.get("/api/v1/transcription/hardware/diagnostics", headers=super_headers)
+    assert r_disabled.status_code == 403
+    assert "System and hardware diagnostics are disabled" in r_disabled.json()["detail"]
+
+    # 4. Super admin succeeds when explicitly enabled
+    monkeypatch.setattr(settings, "ENABLE_SYSTEM_DIAGNOSTICS", True)
     r_super = client.get("/api/v1/transcription/hardware/diagnostics", headers=super_headers)
     assert r_super.status_code == 200
     data = r_super.json()

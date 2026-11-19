@@ -326,6 +326,14 @@ export const OrganizationalMemoryView: React.FC<OrganizationalMemoryViewProps> =
         </span>
       );
     }
+    if (providerUsed === 'gemini') {
+      return (
+        <span className="memory-provider-badge gemini" title="Generated via Google Gemini cloud execution.">
+          <Sparkles size={12} />
+          Google Gemini (Generative)
+        </span>
+      );
+    }
     if (providerUsed === 'ollama') {
       return (
         <span className="memory-provider-badge ollama" title="Generated via local Ollama LLM execution.">

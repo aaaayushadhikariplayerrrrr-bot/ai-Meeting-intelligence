@@ -93,11 +93,23 @@ def extract_meeting_intelligence_job(
             detail="Structured meeting intelligence extraction is disabled in configuration."
         )
 
-    if selected_provider not in {"ollama", "deterministic"}:
+    if selected_provider not in {"gemini", "ollama", "deterministic"}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid provider_override '{payload.provider_override}'. Allowed values: 'ollama', 'deterministic'."
+            detail=f"Invalid provider_override '{payload.provider_override}'. Allowed values: 'gemini', 'ollama', 'deterministic'."
         )
+
+    if selected_provider == "gemini":
+        if not getattr(settings, "GEMINI_ENABLED", False):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Gemini intelligence provider is disabled. Please set GEMINI_ENABLED=true in configuration."
+            )
+        if not getattr(settings, "GEMINI_API_KEY", "") or not getattr(settings, "GEMINI_API_KEY", "").strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Gemini API key is not configured. Please configure GEMINI_API_KEY in the backend environment."
+            )
 
     # 3. Privacy-safe transcript validation
     if payload.source_transcript_id:

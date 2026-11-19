@@ -62,6 +62,7 @@ import type {
 } from './types';
 import { useAuth } from './context/AuthContext';
 import { AuthScreen } from './components/AuthScreen';
+import LandingPage from './components/LandingPage';
 import { OrgSelectionScreen } from './components/OrgSelectionScreen';
 import { MeetingIntelligenceView } from './components/MeetingIntelligenceView';
 import { OrganizationalMemoryView } from './components/OrganizationalMemoryView';
@@ -156,30 +157,81 @@ const ROADMAP_PHASES: PhaseItem[] = [
     technologies: ['Ollama', 'Local LLM', 'Structured Output'],
   },
   {
-    id: 6,
-    title: 'Phase 6: Dual-Source RAG & Cross-Meeting Memory',
+    id: 7,
+    title: 'Phase 7: Dual-Source RAG & Cross-Meeting Memory',
     status: 'planned',
     description: 'Cross-meeting memory search, external reference grounding, intelligent router, timestamp citations.',
     technologies: ['ChromaDB', 'Multilingual Embeddings', 'Hybrid Retrieval'],
   },
   {
-    id: 7,
-    title: 'Phase 7: Privacy, PII Redaction & Audit Logs',
+    id: 8,
+    title: 'Phase 8: Privacy, PII Redaction & Audit Logs',
     status: 'planned',
     description: 'Role-based access control (RBAC), PII/secret masking, raw audio deletion policies, audit logs.',
     technologies: ['JWT Auth', 'PII Masking', 'Audit Trails'],
   },
 ];
 
-export const App: React.FC = () => {
-  const { user, isAuthenticated, isLoading, currentOrg, organizations, switchOrganization, logout } = useAuth();
-  const [isSwitchingOrg, setIsSwitchingOrg] = useState<boolean>(false);
-  const activeOrgIdRef = useRef<string | null>(currentOrg?.organization_id || null);
+const getAuthModeFromHash = (): 'login' | 'register' | null => {
+  if (typeof window === 'undefined') return null;
+  if (window.location.hash === '#login') return 'login';
+  if (window.location.hash === '#register') return 'register';
+  return null;
+};
 
-  // Phase 6C.4: Request lifecycle management
+export const App: React.FC = () => {
+
+  const { user, isAuthenticated, isLoading, currentOrg, organizations, switchOrganization, logout } = useAuth();
+
+  const [isSwitchingOrg, setIsSwitchingOrg] = useState<boolean>(false);
+  const [authMode, setAuthMode] = useState<'login' | 'register' | null>(getAuthModeFromHash);
+
+  const activeOrgIdRef = useRef<string | null>(currentOrg?.organization_id || null);
   const requestEpochRef = useRef<number>(0);
   const activeAbortControllersRef = useRef<Set<AbortController>>(new Set());
   const activeUploadAbortControllerRef = useRef<AbortController | null>(null);
+
+  // Sync auth screen state with browser Back / Forward navigation
+  useEffect(() => {
+    const handlePopState = (event: PopStateEvent) => {
+      const stateMode = event.state?.authMode;
+      if (stateMode === 'login' || stateMode === 'register') {
+        setAuthMode(stateMode);
+        return;
+      }
+      setAuthMode(getAuthModeFromHash());
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  // Clear auth screen state and URL hash once authenticated
+  useEffect(() => {
+    if (isAuthenticated) {
+      setAuthMode(null);
+      if (window.location.hash === '#login' || window.location.hash === '#register') {
+        window.history.replaceState(null, '', window.location.pathname + window.location.search);
+      }
+    }
+  }, [isAuthenticated]);
+
+  const handleSignIn = useCallback(() => {
+    if (window.location.hash !== '#login') {
+      window.history.pushState({ authMode: 'login' }, '', '#login');
+    }
+    setAuthMode('login');
+  }, []);
+
+  const handleGetStarted = useCallback(() => {
+    if (window.location.hash !== '#register') {
+      window.history.pushState({ authMode: 'register' }, '', '#register');
+    }
+    setAuthMode('register');
+  }, []);
+
+
+
 
   useEffect(() => {
     activeOrgIdRef.current = currentOrg?.organization_id || null;
@@ -405,13 +457,17 @@ export const App: React.FC = () => {
     setHardwareDiagnostics(null);
     setActiveInspectorTab('health');
     setActiveMainTab('meetings');
+    setAuthMode(null);
+    if (window.location.hash === '#login' || window.location.hash === '#register') {
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
 
     // 6. Complete the existing AuthContext logout behavior
     await logout();
   };
 
-  const loadTranscriptsForMeeting = useCallback(async (meetingId: string) => {
-    if (!currentOrg) return;
+  const loadTranscriptsForMeeting = useCallback(async (meetingId: string): Promise<TranscriptItem[]> => {
+    if (!currentOrg) return [];
     const capturedEpoch = requestEpochRef.current;
     const capturedOrgId = currentOrg.organization_id;
 
@@ -420,18 +476,26 @@ export const App: React.FC = () => {
       const data = await fetchTranscripts(meetingId, controller.signal);
       if (isContextCurrent(capturedEpoch, capturedOrgId)) {
         setMeetingTranscripts((prev) => ({ ...prev, [meetingId]: data }));
+        return data;
       }
+      return [];
     } catch (e) {
       if (!isAbortError(e)) {
         console.error('Failed to load transcripts:', e);
       }
+      return [];
     } finally {
       unregisterController(controller);
     }
   }, [currentOrg, createRegisteredController, isContextCurrent, unregisterController]);
 
+  // System & Diagnostics is strictly developer-facing, disabled by default and gated behind VITE_ENABLE_SYSTEM_DIAGNOSTICS
+  const isDiagnosticsEnabled = Boolean(
+    import.meta.env.VITE_ENABLE_SYSTEM_DIAGNOSTICS === 'true' && user?.is_super_admin
+  );
+
   const loadHardwareDiagnostics = useCallback(async () => {
-    if (!user?.is_super_admin) {
+    if (!isDiagnosticsEnabled) {
       setHardwareDiagnostics(null);
       return;
     }
@@ -442,7 +506,7 @@ export const App: React.FC = () => {
       // Diagnostics offline
       setHardwareDiagnostics(null);
     }
-  }, [user?.is_super_admin]);
+  }, [isDiagnosticsEnabled]);
 
   const handleStartMeetingTranscription = async (meetingId: string) => {
     if (!currentOrg) return;
@@ -668,28 +732,38 @@ export const App: React.FC = () => {
     itemId: string,
     newStatus: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED'
   ) => {
+    if (!currentOrg) return;
+    const capturedEpoch = requestEpochRef.current;
+    const capturedOrgId = currentOrg.organization_id;
+
     const controller = createRegisteredController();
     try {
       const updated = await updateActionItemStatus(itemId, newStatus, controller.signal);
-      setMeetingIntelligence((prev) => {
-        const current = prev[meetingId];
-        if (!current) return prev;
-        return {
-          ...prev,
-          [meetingId]: {
-            ...current,
-            action_items: current.action_items.map((item) =>
-              item.id === itemId ? { ...item, status: updated.status } : item
-            ),
-          },
-        };
-      });
+      if (isContextCurrent(capturedEpoch, capturedOrgId)) {
+        setMeetingIntelligence((prev) => {
+          const current = prev[meetingId];
+          if (!current) return prev;
+          return {
+            ...prev,
+            [meetingId]: {
+              ...current,
+              action_items: current.action_items.map((item) =>
+                item.id === itemId ? { ...item, status: updated.status } : item
+              ),
+            },
+          };
+        });
+      }
+    } catch (err: unknown) {
+      if (!isAbortError(err)) {
+        throw err;
+      }
     } finally {
       unregisterController(controller);
     }
-  }, [createRegisteredController, unregisterController]);
+  }, [currentOrg, createRegisteredController, isContextCurrent, unregisterController]);
 
-  const handleNavigateToEvidence = useCallback((
+  const handleNavigateToEvidence = useCallback(async (
     meetingId: string,
     segmentId: string,
     _timestampSeconds?: number | null
@@ -698,9 +772,9 @@ export const App: React.FC = () => {
     setEvidenceNavErrorMap((prev) => ({ ...prev, [meetingId]: null }));
     setExpandedTranscripts((prev) => ({ ...prev, [meetingId]: true }));
 
-    const transcripts = meetingTranscripts[meetingId] || [];
+    let transcripts = meetingTranscripts[meetingId] || [];
     if (!meetingTranscripts[meetingId] || transcripts.length === 0) {
-      loadTranscriptsForMeeting(meetingId);
+      transcripts = await loadTranscriptsForMeeting(meetingId);
     }
 
     // Identify which loaded transcript contains the requested segment ID
@@ -792,13 +866,13 @@ export const App: React.FC = () => {
     if (isAuthenticated && currentOrg) {
       await loadMeetings();
     }
-    if (isAuthenticated && user?.is_super_admin) {
+    if (isAuthenticated && isDiagnosticsEnabled) {
       await loadHardwareDiagnostics();
     } else {
       setHardwareDiagnostics(null);
     }
     setIsRefreshing(false);
-  }, [isAuthenticated, user?.is_super_admin, currentOrg, loadMeetings, loadHardwareDiagnostics]);
+  }, [isAuthenticated, isDiagnosticsEnabled, currentOrg, loadMeetings, loadHardwareDiagnostics]);
 
   useEffect(() => {
     runHealthCheck();
@@ -814,7 +888,7 @@ export const App: React.FC = () => {
       if (isAuthenticated && currentOrg) {
         await loadMeetings();
       }
-      if (isAuthenticated && user?.is_super_admin) {
+      if (isAuthenticated && isDiagnosticsEnabled) {
         await loadHardwareDiagnostics();
       } else {
         setHardwareDiagnostics(null);
@@ -825,11 +899,15 @@ export const App: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [isAuthenticated, user?.is_super_admin, currentOrg, loadMeetings, loadHardwareDiagnostics]);
+  }, [isAuthenticated, isDiagnosticsEnabled, currentOrg, loadMeetings, loadHardwareDiagnostics]);
 
   // Poll active processing job
+  const activeJobId = activeJob?.id ?? null;
+  const activeJobStatus = activeJob?.status ?? null;
+  const activeJobMeetingId = activeJob?.meeting_id ?? null;
+
   useEffect(() => {
-    if (!activeJob || activeJob.status === 'COMPLETED' || activeJob.status === 'FAILED' || !currentOrg) {
+    if (!activeJobId || activeJobStatus === 'COMPLETED' || activeJobStatus === 'FAILED' || !currentOrg) {
       return;
     }
 
@@ -854,7 +932,7 @@ export const App: React.FC = () => {
 
       inFlightController = createRegisteredController();
       try {
-        const job = await fetchJobStatus(activeJob.id, inFlightController.signal);
+        const job = await fetchJobStatus(activeJobId, inFlightController.signal);
         if (isCancelled || !isContextCurrent(capturedEpoch, capturedOrgId)) {
           return;
         }
@@ -862,11 +940,14 @@ export const App: React.FC = () => {
         setActiveJob(job);
         if (job.status === 'COMPLETED' || job.status === 'FAILED') {
           await loadMeetings();
-          if (job.job_type === 'TRANSCRIPTION') {
-            await loadTranscriptsForMeeting(activeJob.meeting_id);
-          }
-          if (job.job_type === 'EXTRACTION') {
-            await loadIntelligenceForMeeting(activeJob.meeting_id);
+          const targetMeetingId = job.meeting_id || activeJobMeetingId;
+          if (targetMeetingId) {
+            if (job.job_type === 'TRANSCRIPTION') {
+              await loadTranscriptsForMeeting(targetMeetingId);
+            }
+            if (job.job_type === 'EXTRACTION') {
+              await loadIntelligenceForMeeting(targetMeetingId);
+            }
           }
         }
       } catch (err) {
@@ -897,7 +978,9 @@ export const App: React.FC = () => {
       }
     };
   }, [
-    activeJob,
+    activeJobId,
+    activeJobStatus,
+    activeJobMeetingId,
     currentOrg,
     createRegisteredController,
     isContextCurrent,
@@ -1100,12 +1183,15 @@ export const App: React.FC = () => {
     );
   }
 
-  // 2. Unauthenticated state: display authentication screen
+  // 2. Unauthenticated visitor: show landing page or auth screen
   if (!isAuthenticated) {
-    return <AuthScreen />;
+    if (authMode) {
+      return <AuthScreen defaultMode={authMode} />;
+    }
+    return <LandingPage onSignIn={handleSignIn} onGetStarted={handleGetStarted} />;
   }
 
-  // 3. Organization selection required: multiple organizations (or 0) without active selection
+  // 3. Organization selection required
   if (!currentOrg || organizations.length === 0) {
     return <OrgSelectionScreen />;
   }
@@ -1126,24 +1212,19 @@ export const App: React.FC = () => {
           </div>
 
           <div className="header-actions">
-            <div
-              className={`status-pill ${
-                isRefreshing && !healthResult
-                  ? 'checking'
-                  : isConnected
-                  ? 'connected'
-                  : 'disconnected'
-              }`}
-            >
-              <div className="status-dot" />
-              <span>
-                {isRefreshing && !healthResult
-                  ? 'Checking...'
-                  : isConnected
-                  ? 'Backend Connected'
-                  : 'Backend Disconnected'}
-              </span>
-            </div>
+            {!isConnected && (
+              <div
+                className={`status-pill ${
+                  isRefreshing && !healthResult ? 'checking' : 'disconnected'
+                }`}
+                title="Backend connection offline"
+              >
+                <div className="status-dot" />
+                <span>
+                  {isRefreshing && !healthResult ? 'Connecting...' : 'Backend Disconnected'}
+                </span>
+              </div>
+            )}
 
             <button
               className="refresh-button"
@@ -1234,15 +1315,17 @@ export const App: React.FC = () => {
             <Sparkles size={16} />
             <span>Organizational Memory & Ask AI</span>
           </button>
-          <button
-            type="button"
-            className={`app-nav-tab ${activeMainTab === 'system' ? 'active' : ''}`}
-            onClick={() => setActiveMainTab('system')}
-            data-testid="nav-tab-system"
-          >
-            <Server size={16} />
-            <span>System & Diagnostics</span>
-          </button>
+          {isDiagnosticsEnabled && (
+            <button
+              type="button"
+              className={`app-nav-tab ${activeMainTab === 'system' ? 'active' : ''}`}
+              onClick={() => setActiveMainTab('system')}
+              data-testid="nav-tab-system"
+            >
+              <Server size={16} />
+              <span>System & Diagnostics</span>
+            </button>
+          )}
         </div>
       </nav>
 
@@ -2063,7 +2146,7 @@ export const App: React.FC = () => {
         )}
 
         {/* SYSTEM & DIAGNOSTICS VIEW */}
-        {activeMainTab === 'system' && (
+        {isDiagnosticsEnabled && activeMainTab === 'system' && (
           <>
             {/* Hero Section */}
             <section className="hero-banner">

@@ -43,6 +43,7 @@ from app.services.intelligence.chunking import chunk_transcript_segments, merge_
 from app.services.intelligence.evidence import ground_and_verify_evidence
 from app.services.intelligence.deterministic import DeterministicExtractor
 from app.services.intelligence.ollama_adapter import OllamaExtractor
+from app.services.intelligence.gemini_adapter import GeminiExtractor
 
 logger = logging.getLogger(__name__)
 
@@ -115,34 +116,35 @@ def resolve_privacy_safe_transcript(
 
 def extract_meeting_intelligence(
     meeting_id: str,
-    organization_id: str,
-    db: Session,
+    organization_id: Optional[str] = None,
+    db: Session = None,
     source_transcript_id: Optional[str] = None,
+    requested_transcript_id: Optional[str] = None,
     provider_override: Optional[str] = None,
     output_language: Optional[str] = None,
     allow_fallback: bool = True,
     persist: bool = True,
     ollama_extractor: Optional[OllamaExtractor] = None,
+    gemini_extractor: Optional[GeminiExtractor] = None,
     deterministic_extractor: Optional[DeterministicExtractor] = None,
 ) -> IntelligenceExtractionResult:
     """Orchestrate end-to-end structured intelligence extraction with evidence grounding and privacy validation."""
     # 1. Validate meeting and tenant boundary
-    meeting = (
-        db.query(Meeting)
-        .filter(Meeting.id == meeting_id, Meeting.organization_id == organization_id)
-        .first()
-    )
+    meeting_query = db.query(Meeting).filter(Meeting.id == meeting_id)
+    if organization_id:
+        meeting_query = meeting_query.filter(Meeting.organization_id == organization_id)
+    meeting = meeting_query.first()
     if not meeting:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Meeting '{meeting_id}' not found in this organization."
+            detail=f"Meeting '{meeting_id}' not found."
         )
 
     # 2. Enforce privacy-safe transcript resolution
     transcript = resolve_privacy_safe_transcript(
         meeting_id=meeting.id,
         db=db,
-        requested_transcript_id=source_transcript_id,
+        requested_transcript_id=requested_transcript_id or source_transcript_id,
     )
 
     segments = (
@@ -155,12 +157,18 @@ def extract_meeting_intelligence(
         raise IntelligenceError(f"Transcript '{transcript.id}' has no utterances or segments to process.")
 
     # 3. Provider selection
-    raw_provider = (provider_override or getattr(settings, "INTELLIGENCE_PROVIDER", "deterministic")).strip().lower()
+    if provider_override:
+        raw_provider = provider_override.strip().lower()
+    elif getattr(settings, "GEMINI_ENABLED", False) and getattr(settings, "GEMINI_API_KEY", ""):
+        raw_provider = ProviderType.GEMINI.value
+    else:
+        raw_provider = getattr(settings, "INTELLIGENCE_PROVIDER", "deterministic").strip().lower()
+
     if raw_provider == ProviderType.DISABLED.value:
         raise IntelligenceDisabledError(
             "Structured meeting intelligence extraction is disabled in configuration."
         )
-    if raw_provider not in {ProviderType.OLLAMA.value, ProviderType.DETERMINISTIC.value}:
+    if raw_provider not in {ProviderType.GEMINI.value, ProviderType.OLLAMA.value, ProviderType.DETERMINISTIC.value}:
         raise IntelligenceError(f"Unknown intelligence provider '{raw_provider}'.")
 
     target_lang = output_language or getattr(settings, "INTELLIGENCE_OUTPUT_LANGUAGE", "en")
@@ -175,6 +183,7 @@ def extract_meeting_intelligence(
     )
 
     # Instantiate extractors
+    gemini = gemini_extractor or GeminiExtractor()
     ollama = ollama_extractor or OllamaExtractor()
     deterministic = deterministic_extractor or DeterministicExtractor()
 
@@ -184,7 +193,26 @@ def extract_meeting_intelligence(
 
     # 5. Execute extraction per chunk
     for chunk in chunks:
-        if raw_provider == ProviderType.OLLAMA.value:
+        if raw_provider == ProviderType.GEMINI.value:
+            try:
+                payload = gemini.extract(
+                    segments=chunk,
+                    meeting_title=meeting.title,
+                    output_language=target_lang,
+                )
+            except ProviderExecutionError as pe:
+                if allow_fallback:
+                    logger.warning(f"Gemini extraction failed: {pe}. Falling back to deterministic extractor.")
+                    payload = deterministic.extract(
+                        segments=chunk,
+                        meeting_title=meeting.title,
+                        output_language=target_lang,
+                    )
+                    provider_used = ProviderType.DETERMINISTIC.value
+                    fallback_warning = f"Gemini extraction failed ({str(pe)}). Deterministic extractor was used as fallback."
+                else:
+                    raise
+        elif raw_provider == ProviderType.OLLAMA.value:
             try:
                 payload = ollama.extract(
                     segments=chunk,

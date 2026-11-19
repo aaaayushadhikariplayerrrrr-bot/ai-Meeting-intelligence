@@ -20,6 +20,7 @@ class ProviderType(str, Enum):
     DISABLED = "disabled"
     DETERMINISTIC = "deterministic"
     OLLAMA = "ollama"
+    GEMINI = "gemini"
 
 
 class IntelligenceError(Exception):
@@ -59,3 +60,14 @@ class IntelligenceExtractionResult:
     is_partial: bool = False
     partial_reason: Optional[str] = None
     raw_payload: Optional[StructuredExtractionPayload] = None
+
+    @property
+    def has_intelligence(self) -> bool:
+        return bool(
+            self.summary is not None
+            or self.topics
+            or self.decisions
+            or self.action_items
+            or self.risks
+            or self.unresolved_questions
+        )

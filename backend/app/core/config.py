@@ -61,7 +61,7 @@ class Settings(BaseSettings):
     ENABLE_RETENTION_SCHEDULER: bool = True
 
     # Structured Meeting Intelligence Configuration (Phase 7)
-    INTELLIGENCE_PROVIDER: str = "deterministic"  # "disabled", "ollama", "deterministic"
+    INTELLIGENCE_PROVIDER: str = "deterministic"  # "disabled", "ollama", "deterministic", "gemini"
     OLLAMA_BASE_URL: str = "http://127.0.0.1:11434"
     LLM_MODEL_NAME: str = "llama3.2:3b"
     LLM_REQUEST_TIMEOUT_SECONDS: float = 60.0
@@ -69,6 +69,15 @@ class Settings(BaseSettings):
     INTELLIGENCE_MAX_CHUNKS: int = 50
     INTELLIGENCE_OUTPUT_LANGUAGE: str = "en"
     INTELLIGENCE_MAX_RETRIES: int = 2
+
+    # Gemini Cloud Intelligence & RAG Configuration
+    GEMINI_ENABLED: bool = False
+    GEMINI_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-3.8-flash"
+    GEMINI_REQUEST_TIMEOUT_SECONDS: float = 30.0
+
+    # System Diagnostics UI & Endpoint Gate (Developer Only, Defaults to False)
+    ENABLE_SYSTEM_DIAGNOSTICS: bool = False
 
     # Memory & Organizational RAG Configuration (Phase 8)
     MEMORY_EMBEDDING_MODEL_NAME: str = "intfloat/multilingual-e5-small"
@@ -119,7 +128,7 @@ class Settings(BaseSettings):
     @field_validator("INTELLIGENCE_PROVIDER", mode="after")
     def validate_intelligence_provider(cls, v: str) -> str:
         norm = (v or "").strip().lower()
-        allowed = {"disabled", "ollama", "deterministic"}
+        allowed = {"disabled", "ollama", "deterministic", "gemini"}
         if norm not in allowed:
             raise ValueError(
                 f"Invalid INTELLIGENCE_PROVIDER '{v}'. Must be one of: {sorted(list(allowed))}"

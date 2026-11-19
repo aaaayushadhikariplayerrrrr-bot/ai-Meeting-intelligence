@@ -391,8 +391,10 @@ def test_member_cannot_retrieve_unredacted_transcripts(client, db_session):
     assert count == 0
 
 
-def test_hardware_diagnostics_super_admin_vs_non_super_admin(client, db_session):
-    """Verify only global Super Admin can access hardware diagnostics; non-super-admins receive 403."""
+def test_hardware_diagnostics_super_admin_vs_non_super_admin(client, db_session, monkeypatch):
+    """Verify only global Super Admin can access hardware diagnostics; non-super-admins receive 403, and gated by ENABLE_SYSTEM_DIAGNOSTICS."""
+    from app.core.config import settings
+
     # 1. Non-super-admin user
     reg_user = User(
         email="regular@test.local",
@@ -422,8 +424,14 @@ def test_hardware_diagnostics_super_admin_vs_non_super_admin(client, db_session)
     assert resp_reg.status_code == 403
     assert "Super Administrator" in resp_reg.json()["detail"]
 
-    # Super admin receives 200 OK
+    # Super admin receives 403 when diagnostics are disabled (default)
     super_headers = make_auth_headers(super_user)
+    resp_super_disabled = client.get("/api/v1/transcription/hardware/diagnostics", headers=super_headers)
+    assert resp_super_disabled.status_code == 403
+    assert "System and hardware diagnostics are disabled" in resp_super_disabled.json()["detail"]
+
+    # Super admin receives 200 OK when enabled
+    monkeypatch.setattr(settings, "ENABLE_SYSTEM_DIAGNOSTICS", True)
     resp_super = client.get("/api/v1/transcription/hardware/diagnostics", headers=super_headers)
     assert resp_super.status_code == 200
     data = resp_super.json()

@@ -10,8 +10,11 @@ __pycache__/
 
 # Distribution / packaging
 build/
+
 dist/
+
 develop-eggs/
+
 eggs/
 .eggs/
 lib/
@@ -38,7 +41,7 @@ venv.bak/
 !.env.example
 **/.env
 **/.env.*
-!**/.env.example
+!.**/.env.example
 
 # SQLite Databases, WAL and SHM files
 *.db
@@ -69,8 +72,10 @@ media_storage/
 models_cache/
 model_cache/
 models/
+!backend/app/models/
 .cache/
 data/storage/models/
+!backend/app/models/
 
 # Testing & Coverage
 .pytest_cache/
@@ -84,10 +89,10 @@ htmlcov/
 # Node / Frontend
 node_modules/
 **/node_modules/
-dist/
-**/dist/
-dist-ssr/
-**/dist-ssr/
+frontend/dist/
+frontend/dist-ssr/
+frontend/.vite/
+frontend/.temp/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -110,3 +115,7 @@ scratch/
 *~
 .DS_Store
 Thumbs.db
+
+# Added for GitHub readiness
+backend/venv/
+!**/.env.example

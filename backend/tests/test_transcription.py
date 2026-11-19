@@ -323,10 +323,22 @@ def test_transcription_persistence_and_versioning(db_session, tmp_path, monkeypa
 
 # --- 5. API Endpoint Tests ---
 
-def test_api_hardware_diagnostics(client: TestClient, super_admin_no_membership):
-    """Verify /api/v1/transcription/hardware/diagnostics returns full hardware report for Super Admin."""
+def test_api_hardware_diagnostics(client: TestClient, super_admin_no_membership, monkeypatch):
+    """Verify /api/v1/transcription/hardware/diagnostics behavior:
+    1. Gated with 403 when ENABLE_SYSTEM_DIAGNOSTICS is False (default).
+    2. Returns full hardware report for Super Admin when ENABLE_SYSTEM_DIAGNOSTICS is True.
+    """
+    from app.core.config import settings
     from backend.tests.conftest import make_auth_headers
     headers = make_auth_headers(super_admin_no_membership)
+
+    # 1. Disabled by default -> 403
+    resp_disabled = client.get("/api/v1/transcription/hardware/diagnostics", headers=headers)
+    assert resp_disabled.status_code == 403
+    assert "System and hardware diagnostics are disabled" in resp_disabled.json()["detail"]
+
+    # 2. Enabled explicitly -> 200
+    monkeypatch.setattr(settings, "ENABLE_SYSTEM_DIAGNOSTICS", True)
     resp = client.get("/api/v1/transcription/hardware/diagnostics", headers=headers)
     assert resp.status_code == 200
     data = resp.json()

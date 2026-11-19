@@ -191,6 +191,65 @@ GENERIC_SECRET_ASSIGNMENT_PATTERN = re.compile(
     r"(?i)\b(?:password|passwd|api[_\-]?key|access[_\-]?token|client[_\-]?secret)\s*[:=]\s*['\"]?([a-zA-Z0-9_\-!@#$%^&*]{8,})['\"]?"
 )
 
+# Verbal / Spoken API Keys, Tokens, and Passwords
+VERBAL_API_KEY_INTRO = re.compile(
+    r"(?i)\b(?:(?:my|the|our)?\s*(?:api[_\-\s]*key|secret[_\-\s]*key|access[_\-\s]*token|bearer[_\-\s]*token|auth[_\-\s]*token|client[_\-\s]*secret|चाबी|टोकन|सीक्रेट|एपीआई\s*की)"
+    r"(?:\s+[\w\s]{1,30}?)?\s+(?:is|was|will\s+be|equals?|set\s+to|:\s*)[\s:]*(?:uh\s+|um\s+)?)"
+)
+
+RETRO_API_KEY_PATTERN = re.compile(
+    r"\b([a-zA-Z0-9_\-\s]{1,30})\s+(?:this\s+will\s+be\s+(?:the|our|the\s+our|a)?\s*(?:api[_\-\s]*key|secret[_\-\s]*key|access[_\-\s]*token))\b",
+    re.IGNORECASE
+)
+
+API_KEY_STOP_WORDS = {
+    "this", "that", "which", "and", "or", "so", "then", "to", "check", "please",
+    "okay", "we", "you", "they", "our", "my", "your", "in", "for", "with",
+    "aur", "toh", "bhi"
+}
+
+VERBAL_PASSWORD_INTRO = re.compile(
+    r"(?i)\b(?:(?:my|the|user|admin|account|login|temp|temporary)?\s*(?:password|passwd|passcode|पासवर्ड)\s*(?:is|set\s+to|was|will\s+be|equals?|hai|ye\s+hai|hoga|rakha\s+hai|:\s*)[\s:]*(?:uh\s+|um\s+)?)"
+)
+
+PASSWORD_STOP_WORDS = {
+    "and", "or", "but", "so", "then", "to", "we", "i", "you", "they", "it",
+    "which", "that", "is", "are", "check", "please", "okay", "aur", "toh", "bhi",
+    "yes", "no", "sir", "mam", "this", "my", "your", "in", "on", "at", "for"
+}
+
+# Spoken Email addresses (e.g. "user zero nine eight at the rate gmail.com")
+SPOKEN_EMAIL_PATTERN = re.compile(
+    r"\b([a-zA-Z0-9._%+\-]+(?:\s+[a-zA-Z0-9._%+\-]+)*)\s+(?:at\s+the\s+rate(?:\s+of)?|at\s+rate|@)\s+([a-zA-Z0-9.\-]+(?:\s+dot\s+[a-zA-Z]{2,}|\.[a-zA-Z]{2,}))\b",
+    re.IGNORECASE
+)
+
+# Spoken digit-word mappings (English, Hinglish/Hindi, Devanagari)
+SPOKEN_DIGIT_MAP = {
+    # English
+    "zero": "0", "oh": "0", "nil": "0", "nought": "0",
+    "one": "1", "two": "2", "three": "3", "four": "4",
+    "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9",
+    # Hindi/Hinglish romanized
+    "shunya": "0", "ek": "1", "do": "2", "teen": "3", "chaar": "4", "char": "4",
+    "paanch": "5", "panch": "5", "chhe": "6", "chhah": "6", "che": "6",
+    "saat": "7", "aath": "8", "nau": "9",
+    # Devanagari
+    "शून्य": "0", "एक": "1", "दो": "2", "तीन": "3", "चार": "4",
+    "पांच": "5", "पाँच": "5", "छह": "6", "छे": "6", "सात": "7", "आठ": "8", "नौ": "9",
+}
+
+SPOKEN_DIGIT_TOKEN_PATTERN = re.compile(
+    r"\b(?:double|triple|plus\s+nine\s+one|\+91|zero|oh|nil|nought|one|two|three|four|five|six|seven|eight|nine|"
+    r"shunya|ek|do|teen|chaar|char|paanch|panch|chhe|chhah|che|saat|aath|nau|"
+    r"शून्य|एक|दो|तीन|चार|पांच|पाँच|छह|छे|सात|आठ|नौ|\d)\b",
+    re.IGNORECASE | re.UNICODE
+)
+
+PHONE_AFFIRMATIVE_CONTEXT = re.compile(
+    r"(?i)(?:\b(?:phone|call|tel|mobile|cell|contact|fax|whatsapp|dial|number|no\.?|num\.?)\b|फोन|मोबाइल|नंबर|कॉल)\s*[:\-]?\s*$"
+)
+
 # 5. Credit and Debit Cards (16 digits formatted or continuous)
 CARD_PATTERN = re.compile(
     r"\b(?:\d{4}[\s\-]){3}\d{4}\b|\b(?:\d{16})\b"
@@ -254,6 +313,197 @@ def _luhn_checksum_valid(card_str: str) -> bool:
                 n -= 9
         checksum += n
     return (checksum % 10 == 0)
+
+
+def _redact_verbal_api_keys(text: str) -> Tuple[str, List[str], int]:
+    """Detect and redact verbally introduced or spoken API keys and access tokens."""
+    categories: List[str] = []
+    redaction_count = 0
+
+    # 1. Forward-introduced API keys: e.g. "the api key we are using will be ..."
+    matches = list(VERBAL_API_KEY_INTRO.finditer(text))
+    if matches:
+        for m in reversed(matches):
+            intro_end = m.end()
+            remainder = text[intro_end:]
+            raw_tokens = remainder.split()
+            if not raw_tokens:
+                continue
+            cred_tokens = []
+            for i, tok in enumerate(raw_tokens):
+                clean_tok = re.sub(r"[^\w]", "", tok.lower())
+                if i > 0 and clean_tok in API_KEY_STOP_WORDS:
+                    break
+                if i >= 25:
+                    break
+                cred_tokens.append(tok)
+                if re.search(r"[,.?!;:]$", tok):
+                    break
+
+            if cred_tokens:
+                target_str = " ".join(cred_tokens)
+                t_pos = text.find(target_str, intro_end)
+                if t_pos != -1:
+                    end_pos = t_pos + len(target_str)
+                    trailing_punct = ""
+                    m_punct = re.search(r"([,.?!;:]+)$", target_str)
+                    if m_punct:
+                        trailing_punct = m_punct.group(1)
+                    text = text[:intro_end] + "[API_KEY_REDACTED]" + trailing_punct + text[end_pos:]
+                    categories.append("API_KEY")
+                    redaction_count += 1
+
+    # 2. Retro-introduced API keys: e.g. "... this will be our api key"
+    def _repl_retro(m):
+        nonlocal redaction_count
+        categories.append("API_KEY")
+        redaction_count += 1
+        return "[API_KEY_REDACTED] " + m.group(0)[len(m.group(1)):].lstrip()
+
+    text = RETRO_API_KEY_PATTERN.sub(_repl_retro, text)
+    return text, categories, redaction_count
+
+
+def _redact_verbal_passwords(text: str) -> Tuple[str, List[str], int]:
+    """Detect and redact verbally introduced passwords and passcodes."""
+    matches = list(VERBAL_PASSWORD_INTRO.finditer(text))
+    if not matches:
+        return text, [], 0
+
+    categories: List[str] = []
+    redaction_count = 0
+    for m in reversed(matches):
+        intro_end = m.end()
+        remainder = text[intro_end:]
+        raw_tokens = remainder.split()
+        if not raw_tokens:
+            continue
+        cred_tokens = []
+        for i, tok in enumerate(raw_tokens):
+            clean_tok = re.sub(r"[^\w]", "", tok.lower())
+            if i > 0 and clean_tok in PASSWORD_STOP_WORDS:
+                break
+            if i >= 4:
+                break
+            cred_tokens.append(tok)
+            if re.search(r"[,.?!;:]$", tok):
+                break
+
+        if cred_tokens:
+            target_str = " ".join(cred_tokens)
+            t_pos = text.find(target_str, intro_end)
+            if t_pos != -1:
+                end_pos = t_pos + len(target_str)
+                trailing_punct = ""
+                m_punct = re.search(r"([,.?!;:]+)$", target_str)
+                if m_punct:
+                    trailing_punct = m_punct.group(1)
+                text = text[:intro_end] + "[PASSWORD_REDACTED]" + trailing_punct + text[end_pos:]
+                categories.append("SECRET")
+                redaction_count += 1
+
+    return text, categories, redaction_count
+
+
+def _redact_spoken_and_spaced_numbers(text: str) -> Tuple[str, List[str], int]:
+    """Detect and redact spoken word-digit numbers, spaced digit sequences,
+    and verbal Aadhaar or phone numbers.
+    """
+    matches = list(SPOKEN_DIGIT_TOKEN_PATTERN.finditer(text))
+    if not matches:
+        return text, [], 0
+
+    clusters: List[List[re.Match]] = []
+    current_cluster: List[re.Match] = []
+
+    for m in matches:
+        if not current_cluster:
+            current_cluster.append(m)
+        else:
+            prev = current_cluster[-1]
+            gap = text[prev.end():m.start()]
+            if re.fullmatch(r"[\s,\-]*(?:(?:uh|um|er)\b[\s,\-]*)*", gap, re.IGNORECASE):
+                current_cluster.append(m)
+            else:
+                clusters.append(current_cluster)
+                current_cluster = [m]
+    if current_cluster:
+        clusters.append(current_cluster)
+
+    categories: List[str] = []
+    redaction_count = 0
+    # Process clusters in reverse order so character offsets in earlier text remain valid
+    for cluster in reversed(clusters):
+        digits = []
+        i = 0
+        while i < len(cluster):
+            val = cluster[i].group(0).lower().strip()
+            if val == "double" and i + 1 < len(cluster):
+                next_val = cluster[i + 1].group(0).lower().strip()
+                d = SPOKEN_DIGIT_MAP.get(next_val, next_val if next_val.isdigit() else None)
+                if d and len(d) == 1:
+                    digits.extend([d, d])
+                    i += 2
+                    continue
+            elif val == "triple" and i + 1 < len(cluster):
+                next_val = cluster[i + 1].group(0).lower().strip()
+                d = SPOKEN_DIGIT_MAP.get(next_val, next_val if next_val.isdigit() else None)
+                if d and len(d) == 1:
+                    digits.extend([d, d, d])
+                    i += 2
+                    continue
+            elif val in ("plus nine one", "+91"):
+                digits.extend(["9", "1"])
+                i += 1
+                continue
+            else:
+                d = SPOKEN_DIGIT_MAP.get(val, val if val.isdigit() else None)
+                if d:
+                    digits.append(d)
+            i += 1
+
+        digit_str = "".join(digits)
+        start_idx = cluster[0].start()
+        end_idx = cluster[-1].end()
+        preceding = text[max(0, start_idx - 50):start_idx]
+        following = text[end_idx:min(len(text), end_idx + 40)]
+        has_phone_context = bool(PHONE_AFFIRMATIVE_CONTEXT.search(preceding))
+        has_aadhaar_context = bool(
+            AADHAAR_AFFIRMATIVE_PATTERN.search(preceding) or AADHAAR_AFFIRMATIVE_PATTERN.search(following)
+        )
+
+        replacement = None
+        category = None
+
+        # Aadhaar: 12 digits with affirmative Aadhaar context
+        if len(digit_str) == 12 and has_aadhaar_context:
+            replacement = "[AADHAAR_REDACTED]"
+            category = "AADHAAR"
+        # Indian mobile: 10 digits starting with 6, 7, 8, 9
+        elif len(digit_str) == 10 and digit_str[0] in "6789":
+            replacement = "[PHONE_REDACTED]"
+            category = "PHONE"
+        # International / Country-code Indian mobile (+91 or 91 with 10 digits starting with 6-9)
+        elif len(digit_str) == 12 and digit_str.startswith("91") and digit_str[2] in "6789":
+            replacement = "[PHONE_REDACTED]"
+            category = "PHONE"
+        # STD / 0-prefixed 11-digit mobile
+        elif len(digit_str) == 11 and digit_str[0] == "0" and digit_str[1] in "6789":
+            replacement = "[PHONE_REDACTED]"
+            category = "PHONE"
+        # Phone context with 7-12 digits
+        elif has_phone_context and 7 <= len(digit_str) <= 12:
+            replacement = "[PHONE_REDACTED]"
+            category = "PHONE"
+
+        if replacement:
+            text = text[:start_idx] + replacement + text[end_idx:]
+            categories.append(category)
+            if category == "AADHAAR":
+                categories.append("GOVT_ID")
+            redaction_count += 1
+
+    return text, categories, redaction_count
 
 
 def redact_text(text: str) -> RedactionResult:
@@ -326,7 +576,24 @@ def redact_text(text: str) -> RedactionResult:
 
     current_text, n6 = GENERIC_SECRET_ASSIGNMENT_PATTERN.subn(_redact_assignment, current_text)
 
-    # 2. Email addresses
+    # 1b. Verbal API Keys & Passwords
+    current_text, cats_vapi, n_vapi = _redact_verbal_api_keys(current_text)
+    total_redactions += n_vapi
+    categories.update(cats_vapi)
+
+    current_text, cats_vpw, n_vpw = _redact_verbal_passwords(current_text)
+    total_redactions += n_vpw
+    categories.update(cats_vpw)
+
+    # 2. Email addresses (spoken and standard)
+    def _redact_spoken_email(m):
+        nonlocal total_redactions
+        total_redactions += 1
+        categories.add("EMAIL")
+        return "[EMAIL_REDACTED]"
+
+    current_text, n_semail = SPOKEN_EMAIL_PATTERN.subn(_redact_spoken_email, current_text)
+
     def _redact_email(m):
         nonlocal total_redactions
         total_redactions += 1
@@ -347,7 +614,11 @@ def redact_text(text: str) -> RedactionResult:
 
     current_text = _sub_with_indic_normalization(CARD_PATTERN, _redact_card, current_text)
 
-    # 4. Phone numbers (Processed before Aadhaar to ensure standard mobile/landlines are labeled [PHONE_REDACTED])
+    # 4. Spoken / Spaced numbers and phone numbers
+    current_text, cats_num, n_num = _redact_spoken_and_spaced_numbers(current_text)
+    total_redactions += n_num
+    categories.update(cats_num)
+
     def _redact_phone(m, norm_text):
         nonlocal total_redactions
         total_redactions += 1

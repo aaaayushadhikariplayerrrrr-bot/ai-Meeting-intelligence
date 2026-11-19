@@ -34,6 +34,10 @@ class TopicCreate(BaseModel):
                 raise ValueError("end_time cannot be earlier than start_time.")
         return self
 
+    @property
+    def name(self) -> str:
+        return self.title
+
 
 class DecisionCreate(BaseModel):
     """DTO for creating or extracting an agreed decision."""
@@ -57,6 +61,14 @@ class DecisionCreate(BaseModel):
                     f"Invalid decision status '{v}'. Allowed values: {[s.value for s in DecisionStatus]}"
                 )
         return v
+
+    @property
+    def title(self) -> str:
+        return self.description
+
+    @property
+    def rationale(self) -> Optional[str]:
+        return self.rationale_or_context
 
 
 class ActionItemCreate(BaseModel):
@@ -85,6 +97,10 @@ class ActionItemCreate(BaseModel):
                 )
         return v
 
+    @property
+    def assignee(self) -> Optional[str]:
+        return self.owner_name
+
 
 class RiskCreate(BaseModel):
     """DTO for creating or extracting an identified risk or blocker."""
@@ -105,6 +121,10 @@ class RiskCreate(BaseModel):
                     f"Invalid risk severity '{v}'. Allowed values: {[s.value for s in RiskSeverity]}"
                 )
         return v
+
+    @property
+    def mitigation(self) -> Optional[str]:
+        return self.mitigation_suggestion
 
 
 class UnresolvedQuestionCreate(BaseModel):
@@ -131,6 +151,10 @@ class UnresolvedQuestionCreate(BaseModel):
                 )
         return v
 
+    @property
+    def question(self) -> str:
+        return self.question_text
+
 
 class MeetingSummaryCreate(BaseModel):
     """DTO for creating or updating a meeting summary record."""
@@ -150,6 +174,10 @@ class StructuredExtractionPayload(BaseModel):
     action_items: List[ActionItemCreate] = Field(default_factory=list)
     risks: List[RiskCreate] = Field(default_factory=list)
     unresolved_questions: List[UnresolvedQuestionCreate] = Field(default_factory=list)
+
+    @property
+    def summary(self) -> str:
+        return self.executive_summary
 
 
 # --- API Response DTOs (from_attributes=True for ORM serialization) ---
@@ -449,7 +477,7 @@ class ExtractIntelligenceRequest(BaseModel):
     )
     provider_override: Optional[str] = Field(
         None,
-        description="Optional provider override ('deterministic', 'ollama'). Defaults to system configured provider."
+        description="Optional provider override ('gemini', 'deterministic', 'ollama'). Defaults to system configured provider."
     )
 
 
@@ -468,7 +496,7 @@ class ExtractionJobPayload(BaseModel):
     )
     provider_override: Optional[str] = Field(
         None,
-        description="Optional provider override ('deterministic', 'ollama')."
+        description="Optional provider override ('gemini', 'deterministic', 'ollama')."
     )
     organization_id: Optional[str] = Field(
         None,
@@ -480,8 +508,8 @@ class ExtractionJobPayload(BaseModel):
     def validate_provider(cls, v: Optional[str]) -> Optional[str]:
         if v is not None:
             v_norm = v.strip().lower()
-            if v_norm not in {"ollama", "deterministic", "disabled"}:
-                raise ValueError(f"Invalid provider_override '{v}'. Allowed: 'ollama', 'deterministic', 'disabled'.")
+            if v_norm not in {"ollama", "deterministic", "disabled", "gemini"}:
+                raise ValueError(f"Invalid provider_override '{v}'. Allowed values: 'gemini', 'ollama', 'deterministic', 'disabled'.")
             return v_norm
         return v
 

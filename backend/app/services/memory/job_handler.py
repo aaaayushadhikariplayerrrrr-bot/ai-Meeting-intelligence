@@ -376,10 +376,11 @@ def process_indexing_job_sync(
 
         active_storage = storage_manager or ChunkStorageManager(expected_dim=dimension)
         try:
-            # Clean up old chunks for this transcript if re-indexing or replacing
-            active_storage.delete_chunks_by_transcript(
+            # Clean up all previous chunks for this meeting to ensure no stale, unredacted,
+            # or superseded transcript chunks remain in vector memory or FTS5.
+            active_storage.delete_chunks_by_meeting(
                 db=db,
-                transcript_id=target_transcript.id,
+                meeting_id=meeting.id,
                 organization_id=meeting.organization_id,
             )
             # Store new chunks and synchronize FTS5

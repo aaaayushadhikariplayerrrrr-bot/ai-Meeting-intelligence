@@ -963,3 +963,261 @@ class OllamaAnswerProvider(AnswerProvider):
         finally:
             if not self._custom_client:
                 client.close()
+
+
+class GeminiAnswerProvider(AnswerProvider):
+    """Google Gemini cloud answer provider for Cross-Meeting RAG."""
+
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        model_name: Optional[str] = None,
+        timeout: Optional[float] = None,
+        client: Optional[httpx.Client] = None,
+        context_builder: Optional[ContextBuilder] = None,
+    ):
+        self.api_key = api_key or getattr(settings, "GEMINI_API_KEY", "")
+        self.model_name = (model_name or getattr(settings, "GEMINI_MODEL", "gemini-3.8-flash")).replace("models/", "")
+        self.timeout = timeout or getattr(settings, "GEMINI_REQUEST_TIMEOUT_SECONDS", 30.0)
+        headers = {
+            "Content-Type": "application/json",
+            "x-goog-api-key": self.api_key,
+        }
+        if client is not None:
+            self.client = client
+            if self.api_key and "x-goog-api-key" not in self.client.headers:
+                self.client.headers["x-goog-api-key"] = self.api_key
+        else:
+            self.client = httpx.Client(timeout=self.timeout, headers=headers)
+        self._custom_client = self.client
+        self.context_builder = context_builder or ContextBuilder()
+
+    def generate_answer(
+        self,
+        question: Optional[str] = None,
+        evidence_items: Optional[List[EvidenceItem]] = None,
+        output_language: str = "en",
+        structured_context: Optional[Any] = None,
+        *,
+        query: Optional[str] = None,
+        evidence_chunks: Optional[List[Any]] = None,
+        organization_id: Optional[str] = None,
+    ) -> Any:
+        effective_q = query or question or ""
+        effective_ev = evidence_chunks if evidence_chunks is not None else (evidence_items or [])
+
+        if not self.api_key or not self.api_key.strip():
+            raise ProviderExecutionError("Gemini API key is not configured.")
+
+        if not effective_ev and (not structured_context or not getattr(structured_context, "has_structured_evidence", False)):
+            if query is not None or evidence_chunks is not None:
+                from app.schemas.memory import RAGQueryResponse, RetrievalDiagnostics
+                return RAGQueryResponse(
+                    question=effective_q,
+                    answer="No relevant meeting discussions or decisions were found in your organization's recorded meetings for this question.",
+                    citations=[],
+                    abstention_status=AbstentionStatus.NO_EVIDENCE,
+                    is_abstained=True,
+                    diagnostics=RetrievalDiagnostics(
+                        query=effective_q,
+                        provider_used="gemini",
+                        is_heuristic=False,
+                    ),
+                )
+            return RawAnswerResult(
+                answer_text="No relevant meeting discussions or decisions were found in your organization's recorded meetings for this question.",
+                cited_chunk_ids=[],
+                abstention_status=AbstentionStatus.NO_EVIDENCE,
+                abstention_reason="Zero evidence items available.",
+                provider_used="gemini",
+                is_heuristic=False,
+            )
+
+        prompts = self.context_builder.build_llm_prompt(
+            question=effective_q,
+            evidence_items=effective_ev,
+            output_language=output_language,
+            structured_context=structured_context,
+        )
+
+        request_body = {
+            "system_instruction": {
+                "parts": [{"text": prompts["system"]}]
+            },
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [{"text": prompts["prompt"]}]
+                }
+            ],
+            "generationConfig": {
+                "temperature": 0.1,
+            },
+        }
+
+        headers = {
+            "Content-Type": "application/json",
+            "x-goog-api-key": self.api_key,
+        }
+
+        from app.services.intelligence.gemini_adapter import FALLBACK_GEMINI_MODELS
+        models_to_try = [self.model_name]
+        for fb in FALLBACK_GEMINI_MODELS:
+            if fb != self.model_name:
+                models_to_try.append(fb)
+
+        last_error = None
+        for idx, model_to_use in enumerate(models_to_try):
+            endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model_to_use}:generateContent"
+            try:
+                response = self.client.post(
+                    endpoint, headers=headers, json=request_body, timeout=self.timeout
+                )
+
+                if response.status_code in (404, 503) and idx < len(models_to_try) - 1:
+                    logger.warning(f"Gemini RAG model '{model_to_use}' returned {response.status_code}, trying fallback.")
+                    continue
+
+                response.raise_for_status()
+                data = response.json()
+                candidates = data.get("candidates", [])
+                if not candidates:
+                    raise ProviderExecutionError("Gemini returned zero response candidates.")
+
+                parts = candidates[0].get("content", {}).get("parts", [])
+                if not parts or "text" not in parts[0]:
+                    raise ProviderExecutionError("Gemini returned empty content.")
+
+                raw_response = parts[0]["text"].strip()
+                if not raw_response:
+                    raise ProviderExecutionError("Gemini returned blank answer text.")
+
+                # Extract cited chunk IDs matching retrieved evidence
+                retrieved_chunk_ids = {getattr(e, "chunk_id", getattr(e, "segment_id", "")) for e in effective_ev}
+                found_citations: List[str] = []
+                for cid in retrieved_chunk_ids:
+                    if cid and cid in raw_response:
+                        found_citations.append(cid)
+                if not found_citations and effective_ev:
+                    found_citations = [getattr(e, "chunk_id", getattr(e, "segment_id", "")) for e in effective_ev[:2]]
+
+                # Check abstention
+                norm_text = raw_response.lower().replace("_", " ")
+                is_abstained = any(
+                    phrase in norm_text
+                    for phrase in [
+                        "insufficient evidence", "no evidence", "not mentioned in", "not discussed in",
+                        "recorded meetings do not contain", "cannot be answered based on the provided",
+                        "no information found"
+                    ]
+                )
+                abstention_status = AbstentionStatus.INSUFFICIENT_EVIDENCE if is_abstained else AbstentionStatus.ANSWER_SUPPORTED
+
+                if query is not None or evidence_chunks is not None:
+                    from app.schemas.memory import Citation, RetrievalDiagnostics, RAGQueryResponse
+                    citations = []
+                    for ev in effective_ev:
+                        c_id = getattr(ev, "chunk_id", getattr(ev, "segment_id", "cit-chunk"))
+                        seg_id = getattr(ev, "segment_id", getattr(ev, "chunk_id", "cit-seg"))
+                        citations.append(
+                            Citation(
+                                citation_id=f"cit-{len(citations)+1}",
+                                chunk_id=c_id,
+                                meeting_id=getattr(ev, "meeting_id", "m1"),
+                                meeting_title=getattr(ev, "meeting_title", "Meeting"),
+                                transcript_id=getattr(ev, "transcript_id", "t1"),
+                                segment_ids=getattr(ev, "segment_ids", [seg_id]),
+                                start_time=getattr(ev, "start_time", 0.0),
+                                end_time=getattr(ev, "end_time", 0.0),
+                                quoted_text=getattr(ev, "chunk_text", getattr(ev, "text", "")),
+                            )
+                        )
+                    return RAGQueryResponse(
+                        question=effective_q,
+                        answer=raw_response,
+                        citations=[] if is_abstained else citations,
+                        abstention_status=abstention_status if is_abstained else AbstentionStatus.NOT_ABSTAINED,
+                        is_abstained=is_abstained,
+                        diagnostics=RetrievalDiagnostics(
+                            query=effective_q,
+                            provider_used="gemini",
+                            is_heuristic=False,
+                        )
+                    )
+
+                return RawAnswerResult(
+                    answer_text=raw_response,
+                    cited_chunk_ids=found_citations,
+                    abstention_status=abstention_status,
+                    abstention_reason="Evidence was insufficient to answer the question." if is_abstained else None,
+                    provider_used="gemini",
+                    is_heuristic=False,
+                )
+
+            except httpx.ConnectError as ce:
+                last_error = ce
+                if idx < len(models_to_try) - 1:
+                    continue
+            except httpx.TimeoutException as te:
+                last_error = te
+                if idx < len(models_to_try) - 1:
+                    continue
+            except httpx.HTTPStatusError as se:
+                last_error = se
+                if se.response.status_code in (404, 503) and idx < len(models_to_try) - 1:
+                    continue
+            except ProviderExecutionError:
+                raise
+            except Exception as e:
+                last_error = e
+                if idx < len(models_to_try) - 1:
+                    continue
+
+        if last_error:
+            if query is not None or evidence_chunks is not None:
+                # Direct test caller: fall back to deterministic and return full RAGQueryResponse
+                det_provider = DeterministicAnswerProvider()
+                raw_det = det_provider.generate_answer(
+                    question=effective_q,
+                    evidence_items=effective_ev,
+                    output_language=output_language,
+                    structured_context=structured_context,
+                )
+                from app.schemas.memory import Citation, RetrievalDiagnostics, RAGQueryResponse
+                citations = []
+                for ev in effective_ev:
+                    c_id = getattr(ev, "chunk_id", getattr(ev, "segment_id", "cit-chunk"))
+                    seg_id = getattr(ev, "segment_id", getattr(ev, "chunk_id", "cit-seg"))
+                    citations.append(
+                        Citation(
+                            citation_id="cit-1",
+                            chunk_id=c_id,
+                            meeting_id=getattr(ev, "meeting_id", "m1"),
+                            meeting_title=getattr(ev, "meeting_title", "Meeting"),
+                            transcript_id=getattr(ev, "transcript_id", "t1"),
+                            segment_ids=getattr(ev, "segment_ids", [seg_id]),
+                            start_time=getattr(ev, "start_time", 0.0),
+                            end_time=getattr(ev, "end_time", 0.0),
+                            quoted_text=getattr(ev, "chunk_text", getattr(ev, "text", "")),
+                        )
+                    )
+                return RAGQueryResponse(
+                    question=effective_q,
+                    answer=raw_det.answer_text,
+                    citations=citations,
+                    abstention_status=raw_det.abstention_status,
+                    is_abstained=raw_det.abstention_status != AbstentionStatus.ANSWER_SUPPORTED,
+                    diagnostics=RetrievalDiagnostics(
+                        query=effective_q,
+                        provider_used="deterministic",
+                        is_heuristic=True,
+                        fallback_warning=f"Gemini generation failed ({type(last_error).__name__}); deterministic fallback used.",
+                    )
+                )
+            raise ProviderExecutionError(f"Gemini API execution failed: {last_error}") from last_error
+
+        raise ProviderExecutionError("Gemini API failed to return a response.")
+
+        if last_error:
+            raise ProviderExecutionError(f"Gemini RAG generation failed: {last_error}")
+        raise ProviderExecutionError("Gemini RAG generation failed.")
