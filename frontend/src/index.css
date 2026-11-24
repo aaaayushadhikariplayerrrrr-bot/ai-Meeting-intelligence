@@ -2,43 +2,81 @@
   --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
 
-  /* Color Palette - Modern Slate / Indigo / Emerald */
-  --bg-primary: #0a0d14;
-  --bg-secondary: #111522;
-  --bg-card: #161b2a;
-  --bg-card-hover: #1c2237;
-  --border-subtle: rgba(255, 255, 255, 0.08);
-  --border-accent: rgba(99, 102, 241, 0.3);
+  /* 3-Tier Surface Hierarchy (Linear / Notion Inspired) */
+  --bg-primary: #090c13;         /* Level 0: Deep Canvas */
+  --bg-secondary: #0e121c;       /* Level 1 Inset: Subtle Navigation / Inset Wells */
+  --bg-inset: #070a10;           /* Level 1 Deep Inset: Form inputs & code viewers */
+  --bg-card: #131722;            /* Level 2: Elevated Surface / Cards / Hub */
+  --bg-card-hover: #181d2c;      /* Level 2 Hover: Interactive Elevated Surface */
+  --bg-card-muted: #101420;      /* Level 2 Muted: Sub-containers & panels */
 
+  /* Hairline Borders with Gentle Tonal Contrast */
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-hover: rgba(255, 255, 255, 0.12);
+  --border-accent: rgba(99, 102, 241, 0.32);
+  --border-focus: rgba(99, 102, 241, 0.55);
+
+  /* Typography Colors */
   --text-primary: #f8fafc;
   --text-secondary: #94a3b8;
   --text-muted: #64748b;
 
+  /* Accent & Focus Rings */
   --accent-primary: #6366f1;
   --accent-secondary: #8b5cf6;
-  --accent-glow: rgba(99, 102, 241, 0.15);
+  --accent-glow: rgba(99, 102, 241, 0.12);
+  --ring-accent: rgba(99, 102, 241, 0.25);
 
+  /* Semantic Status Colors (Strictly for state indicators) */
   --success: #10b981;
   --success-bg: rgba(16, 185, 129, 0.12);
-  --success-border: rgba(16, 185, 129, 0.3);
+  --success-border: rgba(16, 185, 129, 0.25);
 
   --error: #ef4444;
   --error-bg: rgba(239, 68, 68, 0.12);
-  --error-border: rgba(239, 68, 68, 0.3);
+  --error-border: rgba(239, 68, 68, 0.25);
 
   --warning: #f59e0b;
   --warning-bg: rgba(245, 158, 11, 0.12);
+  --warning-border: rgba(245, 158, 11, 0.25);
 
+  /* Radii */
   --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 16px;
-  --radius-xl: 24px;
+  --radius-md: 8px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+
+  /* Elevation Shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.55);
 }
 
 * {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+}
+
+/* Global Slim Dark Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.22);
 }
 
 body {
@@ -48,10 +86,29 @@ body {
   line-height: 1.5;
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 #root {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+}
+
+/* Global Form Elements Baseline */
+input, select, textarea {
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 0.875rem;
+  color-scheme: dark;
+}
+
+input[type="datetime-local"],
+input[type="date"],
+input[type="time"] {
+  color-scheme: dark;
+}
+
+input::placeholder, textarea::placeholder {
+  color: var(--text-muted);
 }

@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "test": "node --experimental-strip-types --test src/tests/async_security.test.mjs src/tests/intelligence_frontend.test.mjs src/tests/memory_frontend.test.mjs src/tests/cross_meeting_frontend.test.mjs src/tests/ask_ai_structured_presentation.test.mjs",
+    "test": "node --experimental-strip-types --test src/tests/async_security.test.mjs src/tests/intelligence_frontend.test.mjs src/tests/memory_frontend.test.mjs src/tests/cross_meeting_frontend.test.mjs src/tests/ask_ai_structured_presentation.test.mjs src/tests/pipeline_stepper.test.mjs src/tests/usability_final_pass.test.mjs src/tests/floating_ask_memora_and_org_auth.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

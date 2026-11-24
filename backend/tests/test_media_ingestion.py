@@ -347,3 +347,81 @@ def test_api_organization_isolation(client, db_session):
     )
     assert response.status_code == 404
     assert response.json()["detail"] == "Meeting not found."
+
+
+def test_process_youtube_media_async_completes_job_and_creates_assets(db_session, tmp_path, monkeypatch):
+    """Verify that _process_youtube_media_async calls extract_youtube_stream with progress_hook and completes."""
+    from unittest.mock import patch
+    from app.api.endpoints.media import _process_youtube_media_async
+    from app.models.identity import Organization
+    from app.models.meeting import Meeting, ProcessingJob, MediaAsset, JobStatus, JobType
+    from app.services.media_metadata import MediaMetadata
+
+    monkeypatch.setattr("app.api.endpoints.media.SessionLocal", lambda: db_session)
+    monkeypatch.setattr(db_session, "close", lambda: None)
+
+    org = Organization(name="Test Ingest Org", slug=f"test-ingest-org-{uuid.uuid4().hex[:6]}")
+    db_session.add(org)
+    db_session.commit()
+
+    # Setup DB records
+    meeting = Meeting(organization_id=org.id, title="YouTube Video test123", status="INGESTING")
+    db_session.add(meeting)
+    db_session.commit()
+
+    job = ProcessingJob(meeting_id=meeting.id, job_type=JobType.INGESTION.value, status=JobStatus.PENDING.value)
+    db_session.add(job)
+    db_session.commit()
+
+    raw_file = tmp_path / "yt_test_raw.webm"
+    raw_file.write_bytes(b"dummy raw audio bytes")
+    norm_file = tmp_path / "yt_test_normalized.wav"
+    norm_file.write_bytes(b"dummy normalized wav bytes")
+
+    dummy_meta = MediaMetadata(
+        format_name="wav",
+        duration_seconds=42.0,
+        sample_rate=16000,
+        channels=1,
+        audio_codec="pcm_s16le",
+        file_size_bytes=norm_file.stat().st_size
+    )
+    raw_dummy_meta = MediaMetadata(
+        format_name="webm",
+        duration_seconds=42.0,
+        sample_rate=48000,
+        channels=2,
+        audio_codec="opus",
+        file_size_bytes=raw_file.stat().st_size
+    )
+
+    def mock_extract(youtube_url, output_dir, confirmed_authorization=False, raw_asset_id=None, progress_hook=None):
+        if progress_hook:
+            progress_hook(50.0)
+        return (
+            raw_file,
+            norm_file,
+            {"id": "test123", "title": "Actual YouTube Title", "description": "Actual Description"},
+            dummy_meta,
+            "dummy_checksum_123"
+        )
+
+    with patch("app.api.endpoints.media.extract_youtube_stream", side_effect=mock_extract), \
+         patch("app.api.endpoints.media.extract_media_metadata", return_value=raw_dummy_meta):
+        _process_youtube_media_async(
+            meeting_id=meeting.id,
+            job_id=job.id,
+            youtube_url="https://www.youtube.com/watch?v=test123",
+            meeting_dir_str=str(tmp_path),
+            raw_asset_id="asset-yt-raw-1",
+        )
+
+    db_session.refresh(job)
+    assert job.status == JobStatus.COMPLETED.value
+    assert job.progress == 100.0
+
+    db_session.refresh(meeting)
+    assert meeting.title == "Actual YouTube Title"
+
+    assets = db_session.query(MediaAsset).filter(MediaAsset.meeting_id == meeting.id).all()
+    assert len(assets) == 2

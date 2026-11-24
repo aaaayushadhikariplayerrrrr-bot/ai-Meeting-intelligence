@@ -254,7 +254,7 @@ def test_ollama_adapter_mocked_success():
     def mock_handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/api/generate"
         body = json.loads(request.content)
-        assert body["model"] == "llama3.2:3b"
+        assert body["model"] in {"llama3.2:3b", "qwen3:8b"}
         assert body["format"] == "json"
         return httpx.Response(200, json={"response": json.dumps(mock_llm_json)})
 

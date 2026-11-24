@@ -332,10 +332,10 @@ def get_transcripts_for_meeting(
             detail=f"Meeting {meeting_id} not found."
         )
 
-    is_admin = (tenant.membership.role == OrgRole.ORG_ADMIN.value)
+    can_view_unredacted = tenant.can_view_unredacted_transcripts(meeting.organization_id)
     norm_type = transcript_type.upper() if transcript_type else None
 
-    if not is_admin:
+    if not can_view_unredacted:
         if norm_type in [TranscriptType.ORIGINAL.value, TranscriptType.CLEANED.value]:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -362,8 +362,8 @@ def get_transcripts_for_meeting(
     transcripts = query.order_by(Transcript.created_at.desc(), Transcript.version.desc()).all()
     serialized = [_serialize_transcript(t) for t in transcripts]
 
-    # If an authorized ORG_ADMIN retrieved any ORIGINAL or CLEANED transcripts, record an audit event
-    if is_admin:
+    # If an authorized workspace administrator retrieved any ORIGINAL or CLEANED transcripts, record an audit event
+    if can_view_unredacted:
         unredacted_retrieved = [
             t for t in transcripts
             if t.transcript_type in (TranscriptType.ORIGINAL.value, TranscriptType.CLEANED.value)
@@ -508,8 +508,8 @@ def process_meeting_transcript(
         )
 
     # Role check: CLEANED transcript produces unredacted content containing PII/secrets.
-    # Generating unredacted transcripts requires ORG_ADMIN.
-    if target_type == TranscriptType.CLEANED and tenant.membership.role != OrgRole.ORG_ADMIN.value:
+    # Generating unredacted transcripts requires workspace administrator privileges (ORG_ADMIN or INDIVIDUAL).
+    if target_type == TranscriptType.CLEANED and not tenant.can_generate_unredacted_transcript(meeting.organization_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Organization administrator privileges required to generate unredacted transcripts.",

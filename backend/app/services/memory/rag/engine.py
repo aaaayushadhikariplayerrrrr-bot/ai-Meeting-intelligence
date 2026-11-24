@@ -43,6 +43,10 @@ from app.services.memory.rag.types import (
 from app.services.memory.rag.verification import CitationVerifier
 from app.services.memory.retrieval import search_hybrid_rrf
 from app.services.memory.types import HybridSearchResult
+from app.services.memory.rag.external_knowledge import (
+    ExternalKnowledgeService,
+    get_external_knowledge_service,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +61,7 @@ class RAGEngine:
         context_builder: Optional[ContextBuilder] = None,
         citation_verifier: Optional[CitationVerifier] = None,
         structured_retriever: Optional[StructuredMemoryRetriever] = None,
+        external_knowledge_service: Optional[ExternalKnowledgeService] = None,
     ):
         self.embedding_service = embedding_service
         self.primary_provider = primary_provider
@@ -64,6 +69,7 @@ class RAGEngine:
         self.context_builder = context_builder or ContextBuilder()
         self.citation_verifier = citation_verifier or CitationVerifier()
         self.structured_retriever = structured_retriever or StructuredMemoryRetriever()
+        self.external_knowledge_service = external_knowledge_service or get_external_knowledge_service()
 
     def query(
         self,
@@ -174,6 +180,7 @@ class RAGEngine:
                 query_vector=query_vector,
                 organization_id=org_id,
                 meeting_id=target_meeting_id,
+                project_id=request.project_id,
                 limit=request.max_evidence_chunks * 2,
                 k=60,
                 expected_dim=service.dimension,
@@ -233,6 +240,7 @@ class RAGEngine:
             organization_id=org_id,
             query=question,
             meeting_id=target_meeting_id,
+            project_id=request.project_id,
             start_date=request.start_date,
             end_date=request.end_date,
         )
@@ -286,6 +294,14 @@ class RAGEngine:
                 ),
             )
 
+        # Detect if query or retrieved meeting evidence mentions an external subject needing background context
+        ext_subject = self.external_knowledge_service.extract_external_subject(question, evidence_items)
+        external_knowledge = (
+            self.external_knowledge_service.retrieve_external_knowledge(ext_subject)
+            if ext_subject
+            else None
+        )
+
         # 7. Generate Answer via Answer Provider with Automatic Fallback
         provider = self.primary_provider
         fallback_warning: Optional[str] = None
@@ -298,6 +314,7 @@ class RAGEngine:
                     evidence_items=evidence_items,
                     output_language=request.output_language,
                     structured_context=structured_context,
+                    external_knowledge=external_knowledge,
                 )
             except Exception as prov_exc:
                 logger.warning(f"Primary answer provider failed, falling back to deterministic: {prov_exc}")
@@ -309,6 +326,7 @@ class RAGEngine:
                 evidence_items=evidence_items,
                 output_language=request.output_language,
                 structured_context=structured_context,
+                external_knowledge=external_knowledge,
             )
             if fallback_warning:
                 raw_result.fallback_warning = fallback_warning
@@ -361,6 +379,24 @@ class RAGEngine:
             conflicts_detected_count=len(structured_context.conflicts) + len(raw_result.transcript_conflicts),
         )
 
+        # 9. Determine Source Classification (Meeting Evidence, External Knowledge, Combined, Insufficient Evidence)
+        final_ext_knowledge = raw_result.external_knowledge or external_knowledge
+        has_external = bool(final_ext_knowledge and final_ext_knowledge.is_available)
+        has_meeting_evidence = bool(
+            verified_citations
+            or (structured_context and (structured_context.decisions or structured_context.commitments))
+            or (evidence_items and not is_strictly_abstained)
+        )
+
+        if is_strictly_abstained or (not has_meeting_evidence and not has_external):
+            answer_source_type = "INSUFFICIENT_EVIDENCE"
+        elif has_meeting_evidence and has_external:
+            answer_source_type = "COMBINED"
+        elif has_external and not has_meeting_evidence:
+            answer_source_type = "EXTERNAL_KNOWLEDGE"
+        else:
+            answer_source_type = "MEETING_EVIDENCE"
+
         return RAGQueryResponse(
             question=question,
             answer=raw_result.answer_text,
@@ -373,4 +409,6 @@ class RAGEngine:
             structured_questions=[q.model_dump() for q in structured_context.questions],
             detected_conflicts=structured_context.conflicts,
             transcript_conflicts=raw_result.transcript_conflicts,
+            external_knowledge=final_ext_knowledge,
+            answer_source_type=answer_source_type,
         )

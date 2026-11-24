@@ -25,6 +25,7 @@ from app.core.rate_limit import memory_rate_limiter
 from app.database.session import get_db
 from app.api.deps import get_current_tenant_membership, TenantContext
 from app.models.meeting import Meeting
+from app.models.project import Project
 from app.models.memory import TranscriptChunkRecord
 from app.models.intelligence import Decision
 from app.models.transcription import TranscriptSegment
@@ -94,7 +95,7 @@ def query_memory(
             detail="start_date cannot be later than end_date.",
         )
 
-    # 2. Meeting Ownership Check (if meeting_id is scoped)
+    # 2. Meeting & Project Ownership Check
     if payload.meeting_id:
         meeting = (
             db.query(Meeting)
@@ -107,11 +108,24 @@ def query_memory(
                 detail="Meeting not found or access denied.",
             )
 
+    if payload.project_id:
+        proj = (
+            db.query(Project)
+            .filter(Project.id == payload.project_id, Project.organization_id == org_id)
+            .first()
+        )
+        if not proj:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Project not found or access denied.",
+            )
+
     # 3. Construct Engine Request using strictly validated tenant org_id
     rag_request = RAGQueryRequest(
         question=clean_question,
         organization_id=org_id,
         meeting_id=payload.meeting_id,
+        project_id=payload.project_id,
         start_date=payload.start_date,
         end_date=payload.end_date,
         max_evidence_chunks=payload.max_evidence_chunks,
@@ -169,7 +183,7 @@ def search_memory(
             detail="start_date cannot be later than end_date.",
         )
 
-    # 2. Meeting Ownership Check (if meeting_id is scoped)
+    # 2. Meeting & Project Ownership Check
     if payload.meeting_id:
         meeting = (
             db.query(Meeting)
@@ -182,12 +196,26 @@ def search_memory(
                 detail="Meeting not found or access denied.",
             )
 
+    if payload.project_id:
+        proj = (
+            db.query(Project)
+            .filter(Project.id == payload.project_id, Project.organization_id == org_id)
+            .first()
+        )
+        if not proj:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Project not found or access denied.",
+            )
+
     # 3. Date Range Pre-filter on Meetings
     target_meeting_id = payload.meeting_id
     matching_meeting_ids: Optional[Set[str]] = None
     if payload.start_date or payload.end_date:
         meeting_date_col = func.coalesce(Meeting.actual_start_time, Meeting.scheduled_start_time, Meeting.created_at)
         m_query = db.query(Meeting.id).filter(Meeting.organization_id == org_id)
+        if payload.project_id:
+            m_query = m_query.filter(Meeting.project_id == payload.project_id)
         if payload.start_date:
             m_query = m_query.filter(meeting_date_col >= payload.start_date)
         if payload.end_date:
@@ -207,6 +235,7 @@ def search_memory(
             query_vector=query_vector,
             organization_id=org_id,
             meeting_id=target_meeting_id,
+            project_id=payload.project_id,
             limit=payload.limit * 2,
             expected_dim=service.dimension,
         )
@@ -217,6 +246,7 @@ def search_memory(
             query=clean_query,
             organization_id=org_id,
             meeting_id=target_meeting_id,
+            project_id=payload.project_id,
             limit=payload.limit * 2,
         )
         candidates = [

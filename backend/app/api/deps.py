@@ -33,6 +33,44 @@ class TenantContext:
     def role(self) -> str:
         return self.membership.role
 
+    @property
+    def is_individual_owner(self) -> bool:
+        return (
+            self.membership.role == OrgRole.INDIVIDUAL.value
+            or getattr(self.organization, "account_type", None) == "INDIVIDUAL"
+        )
+
+    @property
+    def is_org_admin(self) -> bool:
+        return self.membership.role in (OrgRole.ORG_ADMIN.value, OrgRole.ADMIN.value)
+
+    @property
+    def is_org_member(self) -> bool:
+        return self.membership.role == OrgRole.MEMBER.value
+
+    @property
+    def is_workspace_admin(self) -> bool:
+        return self.is_org_admin or self.is_individual_owner
+
+    def can_view_unredacted_transcripts(self, meeting_org_id: str) -> bool:
+        if meeting_org_id != self.organization.id:
+            return False
+        return self.is_workspace_admin
+
+    def can_view_privacy_safe_transcripts(self, meeting_org_id: str) -> bool:
+        return meeting_org_id == self.organization.id
+
+    def can_generate_unredacted_transcript(self, meeting_org_id: str) -> bool:
+        if meeting_org_id != self.organization.id:
+            return False
+        return self.is_workspace_admin
+
+    def can_generate_privacy_safe_transcript(self, meeting_org_id: str) -> bool:
+        return meeting_org_id == self.organization.id
+
+    def can_manage_organization_members(self) -> bool:
+        return self.is_org_admin and getattr(self.organization, "account_type", None) != "INDIVIDUAL"
+
 
 def get_current_active_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_scheme),
@@ -163,13 +201,14 @@ def get_current_tenant_membership(
 def require_org_admin(
     tenant: TenantContext = Depends(get_current_tenant_membership),
 ) -> TenantContext:
-    """Ensure the user possesses ORG_ADMIN role in the active tenant organization.
+    """Ensure the user possesses ORG_ADMIN or INDIVIDUAL workspace owner role in the active tenant organization.
 
     Strict rule:
     User.is_super_admin does NOT bypass tenant membership or the organization role check.
     A global Super Admin must possess explicit ORG_ADMIN membership in the selected organization.
+    Individual workspace owners possess admin rights over their isolated workspace.
     """
-    if tenant.membership.role != OrgRole.ORG_ADMIN.value:
+    if not tenant.is_workspace_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Organization administrator privileges required.",

@@ -4,8 +4,16 @@ from .media import (
     MediaAssetResponse,
     ProcessingJobResponse,
     MeetingResponse,
+    MeetingParticipantCreate,
+    MeetingParticipantResponse,
+    PaginatedMeetingsResponse,
     YouTubeIngestRequest,
     IngestResponse,
+)
+from .project import (
+    ProjectCreate,
+    ProjectUpdate,
+    ProjectResponse,
 )
 from .auth import (
     RegisterRequest,
@@ -49,6 +57,12 @@ __all__ = [
     "MediaAssetResponse",
     "ProcessingJobResponse",
     "MeetingResponse",
+    "MeetingParticipantCreate",
+    "MeetingParticipantResponse",
+    "PaginatedMeetingsResponse",
+    "ProjectCreate",
+    "ProjectUpdate",
+    "ProjectResponse",
     "YouTubeIngestRequest",
     "IngestResponse",
     "RegisterRequest",

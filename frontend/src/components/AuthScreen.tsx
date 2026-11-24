@@ -5,6 +5,7 @@ import {
   Lock,
   User,
   Building,
+  Users,
   Eye,
   EyeOff,
   AlertTriangle,
@@ -13,8 +14,12 @@ import {
   Shield,
   LogIn,
   UserPlus,
+  CheckCircle2,
+  Globe,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { lookupDomain } from '../services/api';
+import type { RegistrationType, DomainLookupResponse } from '../types';
 import './AuthScreen.css';
 
 export interface AuthScreenProps {
@@ -25,21 +30,52 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ defaultMode = 'login' })
   const { login, register } = useAuth();
   const [mode, setMode] = useState<'login' | 'register'>(defaultMode);
 
+  // Registration account pathway: CREATE_ORG | JOIN_ORG | INDIVIDUAL
+  const [regType, setRegType] = useState<RegistrationType>('CREATE_ORG');
+
   // Form input states
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [orgName, setOrgName] = useState('');
+  const [companyDomain, setCompanyDomain] = useState('');
+
+  // Domain lookup feedback
+  const [domainStatus, setDomainStatus] = useState<DomainLookupResponse | null>(null);
+  const [isCheckingDomain, setIsCheckingDomain] = useState(false);
 
   // UI behavior states
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const handleSwitchMode = (targetMode: 'login' | 'register') => {
     setMode(targetMode);
     setErrorMessage(null);
+    setSuccessMessage(null);
     setPassword('');
+  };
+
+  // Instant domain lookup when joining an organization
+  const handleDomainBlur = async () => {
+    if (regType !== 'JOIN_ORG' || !companyDomain.trim()) return;
+    setIsCheckingDomain(true);
+    try {
+      const res = await lookupDomain(companyDomain.trim());
+      setDomainStatus(res);
+      if (!res.exists) {
+        setErrorMessage(`No verified organization found registered with domain '${res.domain}'. Please ask your administrator to create the organization first.`);
+      } else if (!res.is_verified) {
+        setErrorMessage(`The organization for '${res.domain}' is not yet verified. An administrator must verify domain ownership first.`);
+      } else {
+        setErrorMessage(null);
+      }
+    } catch {
+      // Ignore lookup failure
+    } finally {
+      setIsCheckingDomain(false);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -47,6 +83,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ defaultMode = 'login' })
     if (isSubmitting) return;
 
     setErrorMessage(null);
+    setSuccessMessage(null);
 
     const trimmedEmail = email.trim().toLowerCase();
     if (!trimmedEmail) {
@@ -61,8 +98,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ defaultMode = 'login' })
 
     if (mode === 'register') {
       const trimmedName = fullName.trim();
-      const trimmedOrg = orgName.trim();
-
       if (!trimmedName) {
         setErrorMessage('Please enter your full name.');
         return;
@@ -75,26 +110,105 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ defaultMode = 'login' })
         setErrorMessage('Password cannot exceed 128 characters.');
         return;
       }
-      if (!trimmedOrg) {
-        setErrorMessage('Please enter an organization or workspace name.');
-        return;
+
+      // 1. Create Organization pathway
+      if (regType === 'CREATE_ORG') {
+        const trimmedOrg = orgName.trim();
+        const trimmedDomain = companyDomain.trim().toLowerCase().replace(/^@/, '').replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+
+        if (!trimmedOrg) {
+          setErrorMessage('Please enter an organization or company name.');
+          return;
+        }
+
+        if (trimmedDomain) {
+          // Check public domain
+          const isPublic = ['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'icloud.com'].includes(trimmedDomain);
+          if (isPublic) {
+            setErrorMessage('Personal email domains (such as Gmail or Yahoo) cannot be used as company domains. Please register an Individual Workspace instead.');
+            return;
+          }
+          const emailDomain = trimmedEmail.split('@')[1];
+          if (emailDomain !== trimmedDomain) {
+            setErrorMessage(`Your email domain (@${emailDomain}) must match the company domain (${trimmedDomain}).`);
+            return;
+          }
+        }
+
+        setIsSubmitting(true);
+        try {
+          await register({
+            registration_type: 'CREATE_ORG',
+            email: trimmedEmail,
+            full_name: trimmedName,
+            password,
+            organization_name: trimmedOrg,
+            company_domain: trimmedDomain || undefined,
+          });
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : 'Registration failed. Please try again.';
+          setErrorMessage(msg);
+        } finally {
+          setIsSubmitting(false);
+        }
       }
 
-      setIsSubmitting(true);
-      try {
-        await register({
-          email: trimmedEmail,
-          full_name: trimmedName,
-          password,
-          organization_name: trimmedOrg,
-        });
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : 'Registration failed. Please try again.';
-        setErrorMessage(msg);
-      } finally {
-        setIsSubmitting(false);
+      // 2. Join Organization pathway
+      else if (regType === 'JOIN_ORG') {
+        const trimmedDomain = companyDomain.trim().toLowerCase().replace(/^@/, '').replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+        if (!trimmedDomain) {
+          setErrorMessage('Please enter your company email domain to find your organization.');
+          return;
+        }
+
+        const isPublic = ['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'icloud.com'].includes(trimmedDomain);
+        if (isPublic) {
+          setErrorMessage('Personal email providers (e.g. Gmail) cannot join corporate organizations. Please use your company email or choose Individual Workspace.');
+          return;
+        }
+
+        const emailDomain = trimmedEmail.split('@')[1];
+        if (emailDomain !== trimmedDomain) {
+          setErrorMessage(`Your email domain (@${emailDomain}) does not match the entered company domain (${trimmedDomain}).`);
+          return;
+        }
+
+        setIsSubmitting(true);
+        try {
+          await register({
+            registration_type: 'JOIN_ORG',
+            email: trimmedEmail,
+            full_name: trimmedName,
+            password,
+            company_domain: trimmedDomain,
+          });
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : 'Failed to join organization. Please verify the domain.';
+          setErrorMessage(msg);
+        } finally {
+          setIsSubmitting(false);
+        }
+      }
+
+      // 3. Individual Workspace pathway
+      else if (regType === 'INDIVIDUAL') {
+        setIsSubmitting(true);
+        try {
+          await register({
+            registration_type: 'INDIVIDUAL',
+            email: trimmedEmail,
+            full_name: trimmedName,
+            password,
+          });
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : 'Registration failed. Please try again.';
+          setErrorMessage(msg);
+        } finally {
+          setIsSubmitting(false);
+        }
       }
     } else {
+      // Login mode - simple, asks only for email and password
       setIsSubmitting(true);
       try {
         await login({
@@ -118,7 +232,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ defaultMode = 'login' })
           <div className="auth-brand-icon">
             <Sparkles size={24} />
           </div>
-          <h1 className="auth-title">Meeting Intelligence</h1>
+          <h1 className="auth-title">MEMORA</h1>
           <p className="auth-subtitle">
             Organizational Memory & Dual-Source Multilingual RAG Platform
           </p>
@@ -150,11 +264,52 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ defaultMode = 'login' })
           </button>
         </div>
 
+        {/* Account Pathway Selection in Register Mode */}
+        {mode === 'register' && (
+          <div className="auth-pathway-tabs" role="tablist" aria-label="Workspace Type">
+            <button
+              type="button"
+              className={`auth-pathway-btn ${regType === 'CREATE_ORG' ? 'active' : ''}`}
+              onClick={() => { setRegType('CREATE_ORG'); setErrorMessage(null); }}
+              title="Create a new verified company workspace as an administrator"
+            >
+              <Building size={13} />
+              <span>Create Org</span>
+            </button>
+            <button
+              type="button"
+              className={`auth-pathway-btn ${regType === 'JOIN_ORG' ? 'active' : ''}`}
+              onClick={() => { setRegType('JOIN_ORG'); setErrorMessage(null); }}
+              title="Join an existing verified company workspace with your work email"
+            >
+              <Users size={13} />
+              <span>Join Org</span>
+            </button>
+            <button
+              type="button"
+              className={`auth-pathway-btn ${regType === 'INDIVIDUAL' ? 'active' : ''}`}
+              onClick={() => { setRegType('INDIVIDUAL'); setErrorMessage(null); }}
+              title="Individual personal workspace without organization affiliation"
+            >
+              <User size={13} />
+              <span>Individual</span>
+            </button>
+          </div>
+        )}
+
         {/* Error Alert Banner */}
         {errorMessage && (
           <div className="auth-error-banner" role="alert">
             <AlertTriangle size={16} />
             <span>{errorMessage}</span>
+          </div>
+        )}
+
+        {/* Success Alert Banner */}
+        {successMessage && (
+          <div className="auth-success-banner" role="status">
+            <CheckCircle2 size={16} color="#34d399" />
+            <span>{successMessage}</span>
           </div>
         )}
 
@@ -181,16 +336,102 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ defaultMode = 'login' })
             </div>
           )}
 
+          {/* Create Organization Specific Fields */}
+          {mode === 'register' && regType === 'CREATE_ORG' && (
+            <>
+              <div className="auth-field-group">
+                <label className="auth-label" htmlFor="auth-orgname">
+                  <Building size={14} /> Organization / Company Name
+                </label>
+                <div className="auth-input-wrapper">
+                  <input
+                    id="auth-orgname"
+                    type="text"
+                    className="auth-input"
+                    placeholder="e.g. Acme Technologies"
+                    value={orgName}
+                    onChange={(e) => setOrgName(e.target.value)}
+                    disabled={isSubmitting}
+                    autoComplete="organization"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="auth-field-group">
+                <label className="auth-label" htmlFor="auth-companydomain">
+                  <Globe size={14} /> Company Domain (e.g. acmetech.com)
+                </label>
+                <div className="auth-input-wrapper">
+                  <input
+                    id="auth-companydomain"
+                    type="text"
+                    className="auth-input"
+                    placeholder="acmetech.com"
+                    value={companyDomain}
+                    onChange={(e) => setCompanyDomain(e.target.value)}
+                    disabled={isSubmitting}
+                    autoComplete="url"
+                  />
+                </div>
+                <span className="auth-field-hint">
+                  The initial creator of this verified domain receives the Admin role.
+                </span>
+              </div>
+            </>
+          )}
+
+          {/* Join Organization Specific Fields */}
+          {mode === 'register' && regType === 'JOIN_ORG' && (
+            <div className="auth-field-group">
+              <label className="auth-label" htmlFor="auth-joindomain">
+                <Globe size={14} /> Company Domain to Join
+              </label>
+              <div className="auth-input-wrapper">
+                <input
+                  id="auth-joindomain"
+                  type="text"
+                  className="auth-input"
+                  placeholder="company.com"
+                  value={companyDomain}
+                  onChange={(e) => setCompanyDomain(e.target.value)}
+                  onBlur={handleDomainBlur}
+                  disabled={isSubmitting}
+                  autoComplete="url"
+                  required
+                />
+                {isCheckingDomain && <RefreshCw size={14} className="spinning auth-input-icon" />}
+              </div>
+              {domainStatus && domainStatus.exists && domainStatus.is_verified && (
+                <span className="auth-field-hint success" style={{ color: '#34d399' }}>
+                  <CheckCircle2 size={12} style={{ display: 'inline', marginRight: 4 }} />
+                  Verified organization: {domainStatus.organization_name}
+                </span>
+              )}
+              <span className="auth-field-hint">
+                Employees join with Member permissions (never automatic Admin).
+              </span>
+            </div>
+          )}
+
+          {/* Email Address */}
           <div className="auth-field-group">
             <label className="auth-label" htmlFor="auth-email">
-              <Mail size={14} /> Email Address
+              <Mail size={14} />{' '}
+              {mode === 'register' && (regType === 'CREATE_ORG' || regType === 'JOIN_ORG')
+                ? 'Company Email Address'
+                : 'Email Address'}
             </label>
             <div className="auth-input-wrapper">
               <input
                 id="auth-email"
                 type="email"
                 className="auth-input"
-                placeholder="name@company.internal"
+                placeholder={
+                  mode === 'register' && (regType === 'CREATE_ORG' || regType === 'JOIN_ORG')
+                    ? 'name@company.com'
+                    : 'name@example.com'
+                }
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 disabled={isSubmitting}
@@ -200,6 +441,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ defaultMode = 'login' })
             </div>
           </div>
 
+          {/* Password */}
           <div className="auth-field-group">
             <label className="auth-label" htmlFor="auth-password">
               <Lock size={14} /> Password
@@ -232,27 +474,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ defaultMode = 'login' })
             )}
           </div>
 
-          {mode === 'register' && (
-            <div className="auth-field-group">
-              <label className="auth-label" htmlFor="auth-orgname">
-                <Building size={14} /> Organization / Workspace Name
-              </label>
-              <div className="auth-input-wrapper">
-                <input
-                  id="auth-orgname"
-                  type="text"
-                  className="auth-input"
-                  placeholder="e.g. Acme Innovations"
-                  value={orgName}
-                  onChange={(e) => setOrgName(e.target.value)}
-                  disabled={isSubmitting}
-                  autoComplete="organization"
-                  required
-                />
-              </div>
-            </div>
-          )}
-
           <button
             type="submit"
             className="auth-submit-btn"
@@ -261,11 +482,19 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ defaultMode = 'login' })
             {isSubmitting ? (
               <>
                 <RefreshCw size={16} className="spinning" />
-                <span>{mode === 'login' ? 'Signing in...' : 'Creating account...'}</span>
+                <span>{mode === 'login' ? 'Signing in...' : 'Processing...'}</span>
               </>
             ) : (
               <>
-                <span>{mode === 'login' ? 'Sign In to Workspace' : 'Create Account & Organization'}</span>
+                <span>
+                  {mode === 'login'
+                    ? 'Sign In to Workspace'
+                    : regType === 'CREATE_ORG'
+                    ? 'Create & Verify Organization'
+                    : regType === 'JOIN_ORG'
+                    ? 'Join as Team Member'
+                    : 'Launch Individual Workspace'}
+                </span>
                 <ArrowRight size={16} />
               </>
             )}
@@ -302,7 +531,11 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ defaultMode = 'login' })
 
           <div className="auth-security-note">
             <Shield size={12} />
-            <span>Argon2id password hashing &bull; Strict Tenant Isolation</span>
+            <span>
+              {regType === 'INDIVIDUAL' && mode === 'register'
+                ? 'Independent Personal Workspace • Zero Data Leakage'
+                : 'Verified Corporate Domains • Strict Tenant Isolation • RBAC'}
+            </span>
           </div>
         </div>
       </div>

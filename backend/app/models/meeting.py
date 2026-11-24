@@ -1,1 +1,249 @@
-import enum\nfrom sqlalchemy import Column, String, Boolean, Text, ForeignKey, Float, BigInteger, DateTime, Integer\nfrom sqlalchemy.orm import relationship\nfrom app.database.base import Base\nfrom app.models.base import UUIDMixin, TimestampMixin\n\n\nclass InputSourceType(str, enum.Enum):\n    """Supported input source types for meetings."""\n    AUDIO = "AUDIO"\n    VIDEO = "VIDEO"\n    YOUTUBE = "YOUTUBE"\n    LIVE_STREAM = "LIVE_STREAM"\n\n\nclass MeetingStatus(str, enum.Enum):\n    """Lifecycle statuses for a meeting."""\n    SCHEDULED = "SCHEDULED"\n    RECORDING = "RECORDING"\n    INGESTING = "INGESTING"\n    PROCESSING = "PROCESSING"\n    COMPLETED = "COMPLETED"\n    FAILED = "FAILED"\n\n\nclass JobType(str, enum.Enum):\n    """Background processing job types."""\n    INGESTION = "INGESTION"\n    TRANSCRIPTION = "TRANSCRIPTION"\n    TRANSCRIPT_PROCESSING = "TRANSCRIPT_PROCESSING"\n    DIARIZATION = "DIARIZATION"\n    SUMMARIZATION = "SUMMARIZATION"\n    EXTRACTION = "EXTRACTION"\n    EMBEDDING = "EMBEDDING"\n\n\nclass JobStatus(str, enum.Enum):\n    """Status of background processing jobs."""\n    PENDING = "PENDING"\n    IN_PROGRESS = "IN_PROGRESS"\n    COMPLETED = "COMPLETED"\n    FAILED = "FAILED"\n    CANCELLED = "CANCELLED"\n\n\nclass Meeting(UUIDMixin, TimestampMixin, Base):\n    """Primary meeting record within an organization."""\n    __tablename__ = "meetings"\n\n    organization_id = Column(\n        String(36),\n        ForeignKey("organizations.id", ondelete="CASCADE"),\n        nullable=False,\n        index=True\n    )\n    title = Column(String(255), nullable=False)\n    description = Column(Text, nullable=True)\n    input_source_type = Column(\n        String(50),\n        default=InputSourceType.AUDIO.value,\n        nullable=False\n    )\n    source_url_or_reference = Column(String(1024), nullable=True)\n    status = Column(\n        String(50),\n        default=MeetingStatus.SCHEDULED.value,\n        nullable=False,\n        index=True\n    )\n    scheduled_start_time = Column(DateTime(timezone=True), nullable=True)\n    actual_start_time = Column(DateTime(timezone=True), nullable=True)\n    actual_end_time = Column(DateTime(timezone=True), nullable=True)\n    created_by_user_id = Column(\n        String(36),\n        ForeignKey("users.id", ondelete="SET NULL"),\n        nullable=True,\n        index=True\n    )\n\n    # Relationships\n    organization = relationship("Organization", back_populates="meetings")\n    created_by_user = relationship(\n        "User",\n        back_populates="created_meetings",\n        foreign_keys=[created_by_user_id]\n    )\n    participants = relationship(\n        "MeetingParticipant",\n        back_populates="meeting",\n        cascade="all, delete-orphan"\n    )\n    media_assets = relationship(\n        "MediaAsset",\n        back_populates="meeting",\n        cascade="all, delete-orphan"\n    )\n    processing_jobs = relationship(\n        "ProcessingJob",\n        back_populates="meeting",\n        cascade="all, delete-orphan"\n    )\n    speakers = relationship(\n        "Speaker",\n        back_populates="meeting",\n        cascade="all, delete-orphan"\n    )\n    transcripts = relationship(\n        "Transcript",\n        back_populates="meeting",\n        cascade="all, delete-orphan"\n    )\n    summaries = relationship(\n        "MeetingSummary",\n        back_populates="meeting",\n        cascade="all, delete-orphan"\n    )\n    topics = relationship(\n        "Topic",\n        back_populates="meeting",\n        cascade="all, delete-orphan"\n    )\n    decisions = relationship(\n        "Decision",\n        back_populates="meeting",\n        cascade="all, delete-orphan"\n    )\n    action_items = relationship(\n        "ActionItem",\n        back_populates="meeting",\n        cascade="all, delete-orphan",\n        foreign_keys="ActionItem.meeting_id",\n    )\n    risks = relationship(\n        "Risk",\n        back_populates="meeting",\n        cascade="all, delete-orphan"\n    )\n    unresolved_questions = relationship(\n        "UnresolvedQuestion",\n        back_populates="meeting",\n        cascade="all, delete-orphan",\n        foreign_keys="UnresolvedQuestion.meeting_id",\n    )\n    source_references = relationship(\n        "SourceReference",\n        back_populates="meeting",\n        cascade="all, delete-orphan"\n    )\n\n\nclass MeetingParticipant(UUIDMixin, TimestampMixin, Base):\n    """Attendee or participant in a meeting (registered user or guest)."""\n    __tablename__ = "meeting_participants"\n\n    meeting_id = Column(\n        String(36),\n        ForeignKey("meetings.id", ondelete="CASCADE"),\n        nullable=False,\n        index=True\n    )\n    user_id = Column(\n        String(36),\n        ForeignKey("users.id", ondelete="SET NULL"),\n        nullable=True,\n        index=True\n    )\n    display_name = Column(String(255), nullable=False)\n    email = Column(String(255), nullable=True)\n    role = Column(String(50), nullable=True)\n\n    # Relationships\n    meeting = relationship("Meeting", back_populates="participants")\n    user = relationship("User")\n\n\nclass MediaAsset(UUIDMixin, TimestampMixin, Base):\n    """Metadata record for audio/video media linked to a meeting.\n\n    IMPORTANT: Never stores raw audio/video binary contents in SQLite.\n    Stores storage metadata, path/URL references, and handles raw audio deletion flags.\n    """\n    __tablename__ = "media_assets"\n\n    meeting_id = Column(\n        String(36),\n        ForeignKey("meetings.id", ondelete="CASCADE"),\n        nullable=False,\n        index=True\n    )\n    file_name = Column(String(255), nullable=False)\n    storage_path = Column(String(1024), nullable=False)  # Local filesystem path or object key\n    media_type = Column(String(50), nullable=False)  # AUDIO, VIDEO, YOUTUBE_STREAM\n    mime_type = Column(String(100), nullable=False)  # e.g., audio/wav, video/mp4\n    file_size_bytes = Column(BigInteger, nullable=True)\n    duration_seconds = Column(Float, nullable=True)\n    checksum_sha256 = Column(String(64), nullable=True)\n    is_raw_deleted = Column(Boolean, default=False, nullable=False)  # Privacy policy tracking\n\n    # Relationships\n    meeting = relationship("Meeting", back_populates="media_assets")\n\n\nclass ProcessingJob(UUIDMixin, TimestampMixin, Base):\n    """Background processing job tracking (transcription, diarization, summarization)."""\n    __tablename__ = "processing_jobs"\n\n    meeting_id = Column(\n        String(36),\n        ForeignKey("meetings.id", ondelete="CASCADE"),\n        nullable=False,\n        index=True\n    )\n    job_type = Column(String(50), nullable=False)\n    status = Column(\n        String(50),\n        default=JobStatus.PENDING.value,\n        nullable=False,\n        index=True\n    )\n    progress = Column(Float, default=0.0, nullable=False)  # 0.0 to 100.0 percent\n    error_message = Column(Text, nullable=True)\n    error_details = Column(Text, nullable=True)\n    attempt_count = Column(Integer, default=0, nullable=False)\n    max_attempts = Column(Integer, default=2, nullable=False)\n    payload = Column(Text, nullable=True)  # JSON-serialized execution parameters\n    started_at = Column(DateTime, nullable=True)\n    completed_at = Column(DateTime, nullable=True)\n\n    # Relationships\n    meeting = relationship("Meeting", back_populates="processing_jobs")\n
+import enum
+from typing import Optional, List
+from sqlalchemy import Column, String, Boolean, Text, ForeignKey, Float, BigInteger, DateTime, Integer
+from sqlalchemy.orm import relationship
+from app.database.base import Base
+from app.models.base import UUIDMixin, TimestampMixin
+
+
+class InputSourceType(str, enum.Enum):
+    """Supported input source types for meetings."""
+    AUDIO = "AUDIO"
+    VIDEO = "VIDEO"
+    YOUTUBE = "YOUTUBE"
+    LIVE_STREAM = "LIVE_STREAM"
+
+
+class MeetingStatus(str, enum.Enum):
+    """Lifecycle statuses for a meeting."""
+    SCHEDULED = "SCHEDULED"
+    RECORDING = "RECORDING"
+    INGESTING = "INGESTING"
+    PROCESSING = "PROCESSING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+
+
+class JobType(str, enum.Enum):
+    """Background processing job types."""
+    INGESTION = "INGESTION"
+    TRANSCRIPTION = "TRANSCRIPTION"
+    TRANSCRIPT_PROCESSING = "TRANSCRIPT_PROCESSING"
+    DIARIZATION = "DIARIZATION"
+    SUMMARIZATION = "SUMMARIZATION"
+    EXTRACTION = "EXTRACTION"
+    EMBEDDING = "EMBEDDING"
+
+
+class JobStatus(str, enum.Enum):
+    """Status of background processing jobs."""
+    PENDING = "PENDING"
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
+
+
+class Meeting(UUIDMixin, TimestampMixin, Base):
+    """Primary meeting record within an organization."""
+    __tablename__ = "meetings"
+
+    organization_id = Column(
+        String(36),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    input_source_type = Column(
+        String(50),
+        default=InputSourceType.AUDIO.value,
+        nullable=False
+    )
+    source_url_or_reference = Column(String(1024), nullable=True)
+    status = Column(
+        String(50),
+        default=MeetingStatus.SCHEDULED.value,
+        nullable=False,
+        index=True
+    )
+    scheduled_start_time = Column(DateTime(timezone=True), nullable=True)
+    actual_start_time = Column(DateTime(timezone=True), nullable=True)
+    actual_end_time = Column(DateTime(timezone=True), nullable=True)
+    category = Column(String(50), nullable=True, index=True)
+    project_id = Column(
+        String(36),
+        ForeignKey("projects.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True
+    )
+    created_by_user_id = Column(
+        String(36),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True
+    )
+
+    # Relationships
+    organization = relationship("Organization", back_populates="meetings")
+    project = relationship("Project", back_populates="meetings")
+
+    @property
+    def project_name(self) -> Optional[str]:
+        return self.project.name if self.project else None
+
+    @property
+    def transcript_types(self) -> List[str]:
+        if not self.transcripts:
+            return []
+        return [t.transcript_type for t in self.transcripts]
+    created_by_user = relationship(
+        "User",
+        back_populates="created_meetings",
+        foreign_keys=[created_by_user_id]
+    )
+    participants = relationship(
+        "MeetingParticipant",
+        back_populates="meeting",
+        cascade="all, delete-orphan"
+    )
+    media_assets = relationship(
+        "MediaAsset",
+        back_populates="meeting",
+        cascade="all, delete-orphan"
+    )
+    processing_jobs = relationship(
+        "ProcessingJob",
+        back_populates="meeting",
+        cascade="all, delete-orphan"
+    )
+    speakers = relationship(
+        "Speaker",
+        back_populates="meeting",
+        cascade="all, delete-orphan"
+    )
+    transcripts = relationship(
+        "Transcript",
+        back_populates="meeting",
+        cascade="all, delete-orphan"
+    )
+    summaries = relationship(
+        "MeetingSummary",
+        back_populates="meeting",
+        cascade="all, delete-orphan"
+    )
+    topics = relationship(
+        "Topic",
+        back_populates="meeting",
+        cascade="all, delete-orphan"
+    )
+    decisions = relationship(
+        "Decision",
+        back_populates="meeting",
+        cascade="all, delete-orphan"
+    )
+    action_items = relationship(
+        "ActionItem",
+        back_populates="meeting",
+        cascade="all, delete-orphan",
+        foreign_keys="ActionItem.meeting_id",
+    )
+    risks = relationship(
+        "Risk",
+        back_populates="meeting",
+        cascade="all, delete-orphan"
+    )
+    unresolved_questions = relationship(
+        "UnresolvedQuestion",
+        back_populates="meeting",
+        cascade="all, delete-orphan",
+        foreign_keys="UnresolvedQuestion.meeting_id",
+    )
+    source_references = relationship(
+        "SourceReference",
+        back_populates="meeting",
+        cascade="all, delete-orphan"
+    )
+
+
+class MeetingParticipant(UUIDMixin, TimestampMixin, Base):
+    """Attendee or participant in a meeting (registered user or guest)."""
+    __tablename__ = "meeting_participants"
+
+    meeting_id = Column(
+        String(36),
+        ForeignKey("meetings.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+    user_id = Column(
+        String(36),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True
+    )
+    display_name = Column(String(255), nullable=False)
+    email = Column(String(255), nullable=True)
+    role = Column(String(50), nullable=True)
+
+    # Relationships
+    meeting = relationship("Meeting", back_populates="participants")
+    user = relationship("User")
+
+
+class MediaAsset(UUIDMixin, TimestampMixin, Base):
+    """Metadata record for audio/video media linked to a meeting.
+
+    IMPORTANT: Never stores raw audio/video binary contents in SQLite.
+    Stores storage metadata, path/URL references, and handles raw audio deletion flags.
+    """
+    __tablename__ = "media_assets"
+
+    meeting_id = Column(
+        String(36),
+        ForeignKey("meetings.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+    file_name = Column(String(255), nullable=False)
+    storage_path = Column(String(1024), nullable=False)  # Local filesystem path or object key
+    media_type = Column(String(50), nullable=False)  # AUDIO, VIDEO, YOUTUBE_STREAM
+    mime_type = Column(String(100), nullable=False)  # e.g., audio/wav, video/mp4
+    file_size_bytes = Column(BigInteger, nullable=True)
+    duration_seconds = Column(Float, nullable=True)
+    checksum_sha256 = Column(String(64), nullable=True)
+    is_raw_deleted = Column(Boolean, default=False, nullable=False)  # Privacy policy tracking
+
+    # Relationships
+    meeting = relationship("Meeting", back_populates="media_assets")
+
+
+class ProcessingJob(UUIDMixin, TimestampMixin, Base):
+    """Background processing job tracking (transcription, diarization, summarization)."""
+    __tablename__ = "processing_jobs"
+
+    meeting_id = Column(
+        String(36),
+        ForeignKey("meetings.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+    job_type = Column(String(50), nullable=False)
+    status = Column(
+        String(50),
+        default=JobStatus.PENDING.value,
+        nullable=False,
+        index=True
+    )
+    progress = Column(Float, default=0.0, nullable=False)  # 0.0 to 100.0 percent
+    error_message = Column(Text, nullable=True)
+    error_details = Column(Text, nullable=True)
+    attempt_count = Column(Integer, default=0, nullable=False)
+    max_attempts = Column(Integer, default=2, nullable=False)
+    payload = Column(Text, nullable=True)  # JSON-serialized execution parameters
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+
+    # Relationships
+    meeting = relationship("Meeting", back_populates="processing_jobs")

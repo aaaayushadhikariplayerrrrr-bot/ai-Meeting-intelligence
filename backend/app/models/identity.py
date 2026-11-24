@@ -1,1 +1,117 @@
-import enum\nfrom sqlalchemy import Column, String, Boolean, Text, ForeignKey, UniqueConstraint, Integer\nfrom sqlalchemy.orm import relationship\nfrom app.database.base import Base\nfrom app.models.base import UUIDMixin, TimestampMixin\n\n\nclass OrgRole(str, enum.Enum):\n    """Organization-level membership roles."""\n    ORG_ADMIN = "ORG_ADMIN"\n    MEMBER = "MEMBER"\n\n\nclass User(UUIDMixin, TimestampMixin, Base):\n    """User account entity.\n\n    Global system administration (is_super_admin) is distinguished from\n    organization-level roles which are captured in OrganizationMembership.\n    """\n    __tablename__ = "users"\n\n    email = Column(String(255), unique=True, index=True, nullable=False)\n    full_name = Column(String(255), nullable=False)\n    hashed_password = Column(String(255), nullable=True)  # Placeholder for auth phase\n    is_super_admin = Column(Boolean, default=False, nullable=False)  # Global system privilege\n    is_active = Column(Boolean, default=True, nullable=False)\n    token_version = Column(Integer, default=1, nullable=False, server_default="1")\n\n    # Relationships\n    memberships = relationship(\n        "OrganizationMembership",\n        back_populates="user",\n        cascade="all, delete-orphan"\n    )\n    created_meetings = relationship(\n        "Meeting",\n        back_populates="created_by_user",\n        foreign_keys="Meeting.created_by_user_id"\n    )\n    action_items = relationship(\n        "ActionItem",\n        back_populates="owner_user"\n    )\n\n\nclass Organization(UUIDMixin, TimestampMixin, Base):\n    """Organization / workspace tenant for organizational data isolation."""\n    __tablename__ = "organizations"\n\n    name = Column(String(255), nullable=False)\n    slug = Column(String(100), unique=True, index=True, nullable=False)\n    description = Column(Text, nullable=True)\n    is_active = Column(Boolean, default=True, nullable=False)\n\n    # Relationships\n    memberships = relationship(\n        "OrganizationMembership",\n        back_populates="organization",\n        cascade="all, delete-orphan"\n    )\n    meetings = relationship(\n        "Meeting",\n        back_populates="organization",\n        cascade="all, delete-orphan"\n    )\n    knowledge_records = relationship(\n        "KnowledgeRecord",\n        back_populates="organization",\n        cascade="all, delete-orphan"\n    )\n    audit_logs = relationship(\n        "AuditLog",\n        back_populates="organization",\n        cascade="all, delete-orphan"\n    )\n\n\nclass OrganizationMembership(UUIDMixin, TimestampMixin, Base):\n    """Mapping between User and Organization defining tenant-level role."""\n    __tablename__ = "organization_memberships"\n\n    organization_id = Column(\n        String(36),\n        ForeignKey("organizations.id", ondelete="CASCADE"),\n        nullable=False,\n        index=True\n    )\n    user_id = Column(\n        String(36),\n        ForeignKey("users.id", ondelete="CASCADE"),\n        nullable=False,\n        index=True\n    )\n    role = Column(String(50), default=OrgRole.MEMBER.value, nullable=False)\n    is_active = Column(Boolean, default=True, nullable=False)\n\n    # Relationships\n    organization = relationship("Organization", back_populates="memberships")\n    user = relationship("User", back_populates="memberships")\n\n    __table_args__ = (\n        UniqueConstraint("organization_id", "user_id", name="uq_org_user_membership"),\n    )\n
+import enum
+from sqlalchemy import Column, String, Boolean, Text, ForeignKey, UniqueConstraint, Integer
+from sqlalchemy.orm import relationship
+from app.database.base import Base
+from app.models.base import UUIDMixin, TimestampMixin
+
+
+class OrgRole(str, enum.Enum):
+    """Organization-level membership roles."""
+    ORG_ADMIN = "ORG_ADMIN"
+    ADMIN = "ORG_ADMIN"  # Canonical alias for ORG_ADMIN
+    MEMBER = "MEMBER"
+    INDIVIDUAL = "INDIVIDUAL"
+
+
+class User(UUIDMixin, TimestampMixin, Base):
+    """User account entity.
+
+    Global system administration (is_super_admin) is distinguished from
+    organization-level roles which are captured in OrganizationMembership.
+    """
+    __tablename__ = "users"
+
+    email = Column(String(255), unique=True, index=True, nullable=False)
+    full_name = Column(String(255), nullable=False)
+    hashed_password = Column(String(255), nullable=True)  # Placeholder for auth phase
+    is_super_admin = Column(Boolean, default=False, nullable=False)  # Global system privilege
+    is_active = Column(Boolean, default=True, nullable=False)
+    is_verified = Column(Boolean, default=True, nullable=False, server_default="1")
+    verification_token = Column(String(255), nullable=True)
+    token_version = Column(Integer, default=1, nullable=False, server_default="1")
+
+    # Relationships
+    memberships = relationship(
+        "OrganizationMembership",
+        back_populates="user",
+        cascade="all, delete-orphan"
+    )
+    created_meetings = relationship(
+        "Meeting",
+        back_populates="created_by_user",
+        foreign_keys="Meeting.created_by_user_id"
+    )
+    action_items = relationship(
+        "ActionItem",
+        back_populates="owner_user"
+    )
+
+
+class Organization(UUIDMixin, TimestampMixin, Base):
+    """Organization / workspace tenant for organizational data isolation."""
+    __tablename__ = "organizations"
+
+    name = Column(String(255), nullable=False)
+    slug = Column(String(100), unique=True, index=True, nullable=False)
+    description = Column(Text, nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+    company_domain = Column(String(255), nullable=True, index=True)
+    is_domain_verified = Column(Boolean, default=True, nullable=False, server_default="1")
+    domain_verification_token = Column(String(255), nullable=True)
+    domain_verification_method = Column(String(50), nullable=True)
+    account_type = Column(String(50), default="ORGANIZATION", nullable=False, server_default="ORGANIZATION")
+
+    # Relationships
+    memberships = relationship(
+        "OrganizationMembership",
+        back_populates="organization",
+        cascade="all, delete-orphan"
+    )
+    meetings = relationship(
+        "Meeting",
+        back_populates="organization",
+        cascade="all, delete-orphan"
+    )
+    knowledge_records = relationship(
+        "KnowledgeRecord",
+        back_populates="organization",
+        cascade="all, delete-orphan"
+    )
+    audit_logs = relationship(
+        "AuditLog",
+        back_populates="organization",
+        cascade="all, delete-orphan"
+    )
+    projects = relationship(
+        "Project",
+        back_populates="organization",
+        cascade="all, delete-orphan"
+    )
+
+
+class OrganizationMembership(UUIDMixin, TimestampMixin, Base):
+    """Mapping between User and Organization defining tenant-level role."""
+    __tablename__ = "organization_memberships"
+
+    organization_id = Column(
+        String(36),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+    user_id = Column(
+        String(36),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+    role = Column(String(50), default=OrgRole.MEMBER.value, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+
+    # Relationships
+    organization = relationship("Organization", back_populates="memberships")
+    user = relationship("User", back_populates="memberships")
+
+    __table_args__ = (
+        UniqueConstraint("organization_id", "user_id", name="uq_org_user_membership"),
+    )

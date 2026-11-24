@@ -7,6 +7,7 @@ import numpy as np
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.models.meeting import Meeting
 from app.models.memory import TranscriptChunkRecord
 from app.services.memory.exceptions import (
     RetrievalError,
@@ -148,6 +149,7 @@ def search_keyword(
     query: str,
     organization_id: str,
     meeting_id: Optional[str] = None,
+    project_id: Optional[str] = None,
     limit: int = 20,
 ) -> List[KeywordSearchResult]:
     """Execute tenant-isolated SQLite FTS5 keyword full-text search with BM25 ranking.
@@ -199,6 +201,10 @@ def search_keyword(
         sql_parts.append("  AND tc.meeting_id = :meeting_id")
         params["meeting_id"] = meeting_id
 
+    if project_id is not None:
+        sql_parts.append("  AND tc.meeting_id IN (SELECT id FROM meetings WHERE project_id = :project_id AND organization_id = :organization_id)")
+        params["project_id"] = project_id
+
     # In SQLite FTS5, bm25() returns negative values where lower is more relevant (e.g. -1.5 < -1.0)
     sql_parts.append("ORDER BY bm25_rank ASC")
     sql_parts.append("LIMIT :limit")
@@ -243,6 +249,7 @@ def search_semantic(
     query_vector: Union[List[float], np.ndarray],
     organization_id: str,
     meeting_id: Optional[str] = None,
+    project_id: Optional[str] = None,
     limit: int = 20,
     expected_dim: int = EXPECTED_DIMENSION,
 ) -> List[SemanticSearchResult]:
@@ -306,6 +313,16 @@ def search_semantic(
     if meeting_id is not None:
         db_query = db_query.filter(TranscriptChunkRecord.meeting_id == meeting_id)
 
+    if project_id is not None:
+        db_query = db_query.filter(
+            TranscriptChunkRecord.meeting_id.in_(
+                db.query(Meeting.id).filter(
+                    Meeting.project_id == project_id,
+                    Meeting.organization_id == organization_id
+                )
+            )
+        )
+
     candidates = db_query.all()
     if not candidates:
         return []
@@ -359,6 +376,7 @@ def search_hybrid_rrf(
     query_vector: Union[List[float], np.ndarray],
     organization_id: str,
     meeting_id: Optional[str] = None,
+    project_id: Optional[str] = None,
     limit: int = 20,
     k: int = 60,
     expected_dim: int = EXPECTED_DIMENSION,
@@ -384,6 +402,7 @@ def search_hybrid_rrf(
         query=query,
         organization_id=organization_id,
         meeting_id=meeting_id,
+        project_id=project_id,
         limit=limit * 2,  # Oversample to allow rich fusion
     )
 
@@ -393,6 +412,7 @@ def search_hybrid_rrf(
         query_vector=query_vector,
         organization_id=organization_id,
         meeting_id=meeting_id,
+        project_id=project_id,
         limit=limit * 2,  # Oversample to allow rich fusion
         expected_dim=expected_dim,
     )

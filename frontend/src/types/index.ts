@@ -48,6 +48,56 @@ export interface ProcessingJob {
   updated_at: string;
 }
 
+export interface MeetingParticipantItem {
+  id: string;
+  meeting_id: string;
+  user_id?: string | null;
+  display_name: string;
+  email?: string | null;
+  role?: string | null;
+  created_at: string;
+}
+
+export interface ProjectItem {
+  id: string;
+  organization_id: string;
+  name: string;
+  slug: string;
+  description?: string | null;
+  created_by_user_id?: string | null;
+  created_at: string;
+  updated_at: string;
+  meeting_count: number;
+}
+
+export interface CreateProjectPayload {
+  name: string;
+  description?: string;
+  slug?: string;
+}
+
+export interface PaginatedMeetingsResponse {
+  items: MeetingItem[];
+  total: number;
+  page: number;
+  pages: number;
+  limit: number;
+}
+
+export interface MeetingFilterParams {
+  page?: number;
+  limit?: number;
+  skip?: number;
+  search?: string;
+  project_id?: string;
+  category?: string;
+  status?: string;
+  start_date?: string;
+  end_date?: string;
+  participant?: string;
+  paginate?: boolean;
+}
+
 export interface MeetingItem {
   id: string;
   organization_id: string;
@@ -57,8 +107,16 @@ export interface MeetingItem {
   source_url_or_reference: string | null;
   status: string;
   created_at: string;
+  scheduled_start_time?: string | null;
+  actual_start_time?: string | null;
+  actual_end_time?: string | null;
+  category?: string | null;
+  project_id?: string | null;
+  project_name?: string | null;
   media_assets: MediaAsset[];
   processing_jobs: ProcessingJob[];
+  participants?: MeetingParticipantItem[];
+  transcript_types?: string[];
 }
 
 export interface IngestResponse {
@@ -146,16 +204,55 @@ export interface LoginRequest {
   password: string;
 }
 
+export type RegistrationType = 'CREATE_ORG' | 'JOIN_ORG' | 'INDIVIDUAL';
+
 export interface RegisterRequest {
+  registration_type?: RegistrationType;
   email: string;
   full_name: string;
   password: string;
-  organization_name: string;
+  organization_name?: string;
+  company_domain?: string;
+  verification_code?: string;
 }
 
 export interface TokenResponse {
   access_token: string;
   token_type: string;
+  account_type?: string;
+  role?: string;
+  is_domain_verified?: boolean;
+  is_verified?: boolean;
+  verification_challenge?: {
+    token?: string;
+    txt_record_host?: string;
+    txt_record_value?: string;
+    email_code?: string;
+  };
+  message?: string;
+}
+
+export interface DomainLookupResponse {
+  domain: string;
+  exists: boolean;
+  is_verified: boolean;
+  organization_name?: string;
+}
+
+export interface VerifyDomainRequest {
+  organization_id: string;
+  verification_method?: string;
+  token: string;
+}
+
+export interface OrgMemberItem {
+  membership_id: string;
+  user_id: string;
+  email: string;
+  full_name: string;
+  role: string;
+  is_active: boolean;
+  created_at: string;
 }
 
 // --- Phase 7: Structured Meeting Intelligence Schemas ---
@@ -309,11 +406,30 @@ export interface MemoryDiagnostics {
 export interface MemoryQueryRequest {
   question: string;
   meeting_id?: string | null;
+  project_id?: string | null;
   start_date?: string | null;
   end_date?: string | null;
   max_evidence_chunks?: number;
   output_language?: string;
   organization_id?: string | null;
+}
+
+export interface ExternalKnowledgeCitation {
+  source_title: string;
+  source_url: string;
+  snippet?: string | null;
+  published_date?: string | null;
+}
+
+export interface ExternalKnowledgeResult {
+  subject: string;
+  summary: string;
+  key_facts: string[];
+  citations: ExternalKnowledgeCitation[];
+  provider_used: string;
+  is_available: boolean;
+  unavailability_reason?: string | null;
+  disclaimer: string;
 }
 
 export interface MemoryQueryResponse {
@@ -328,11 +444,14 @@ export interface MemoryQueryResponse {
   structured_questions?: CrossMeetingQuestionItem[];
   detected_conflicts?: DecisionConflictItem[];
   transcript_conflicts?: TranscriptConflictItem[];
+  external_knowledge?: ExternalKnowledgeResult | null;
+  answer_source_type?: 'MEETING_EVIDENCE' | 'EXTERNAL_KNOWLEDGE' | 'COMBINED' | 'INSUFFICIENT_EVIDENCE' | string;
 }
 
 export interface MemorySearchRequest {
   query: string;
   meeting_id?: string | null;
+  project_id?: string | null;
   start_date?: string | null;
   end_date?: string | null;
   limit?: number;

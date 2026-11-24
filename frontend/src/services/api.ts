@@ -33,6 +33,14 @@ import type {
   CommitmentFilterParams,
   QuestionFilterParams,
   ConflictFilterParams,
+  ProjectItem,
+  CreateProjectPayload,
+  MeetingParticipantItem,
+  PaginatedMeetingsResponse,
+  MeetingFilterParams,
+  DomainLookupResponse,
+  VerifyDomainRequest,
+  OrgMemberItem,
 } from '../types';
 
 const API_BASE_URL = import.meta.env?.VITE_API_URL || 'http://127.0.0.1:8000';
@@ -335,12 +343,100 @@ export async function fetchUserOrganizations(): Promise<OrgMembershipResponse[]>
   return await response.json();
 }
 
-// --- Protected Media Ingestion Endpoints ---
+export async function lookupDomain(domain: string, signal?: AbortSignal): Promise<DomainLookupResponse> {
+  const params = new URLSearchParams({ domain: domain.trim() });
+  const response = await fetch(`${API_BASE_URL}/api/v1/auth/organizations/by-domain?${params.toString()}`, {
+    method: 'GET',
+    headers: { 'Accept': 'application/json' },
+    signal,
+  });
+  if (!response.ok) {
+    return { domain, exists: false, is_verified: false };
+  }
+  return await response.json();
+}
 
-export async function fetchMeetings(signal?: AbortSignal): Promise<MeetingItem[]> {
-  const response = await authFetch(`${API_BASE_URL}/api/v1/media/meetings`, {
+export async function verifyDomain(
+  data: VerifyDomainRequest,
+  signal?: AbortSignal
+): Promise<{ status: string; message: string }> {
+  const response = await authFetch(`${API_BASE_URL}/api/v1/auth/verify-domain`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+    signal,
+  });
+  if (!response.ok) {
+    const message = await extractErrorMessage(response, 'Domain verification failed');
+    throw new Error(message);
+  }
+  return await response.json();
+}
+
+export async function fetchOrgMembers(signal?: AbortSignal): Promise<OrgMemberItem[]> {
+  const response = await authFetch(`${API_BASE_URL}/api/v1/auth/organization/members`, {
     method: 'GET',
     signal,
+  });
+  if (!response.ok) {
+    const message = await extractErrorMessage(response, 'Failed to fetch organization members');
+    throw new Error(message);
+  }
+  return await response.json();
+}
+
+export async function updateMemberRole(
+  membershipId: string,
+  role: string,
+  signal?: AbortSignal
+): Promise<OrgMemberItem> {
+  const response = await authFetch(`${API_BASE_URL}/api/v1/auth/organization/members/${membershipId}/role`, {
+    method: 'PATCH',
+    body: JSON.stringify({ role }),
+    signal,
+  });
+  if (!response.ok) {
+    const message = await extractErrorMessage(response, 'Failed to update member role');
+    throw new Error(message);
+  }
+  return await response.json();
+}
+
+// --- Protected Media Ingestion Endpoints ---
+
+export async function fetchMeetings(
+  params?: MeetingFilterParams | AbortSignal,
+  signal?: AbortSignal
+): Promise<MeetingItem[] | PaginatedMeetingsResponse> {
+  let filterParams: MeetingFilterParams | undefined = undefined;
+  let abortSignal: AbortSignal | undefined = signal;
+
+  if (params) {
+    if (params instanceof AbortSignal || ('aborted' in (params as object) && !('page' in (params as object) || 'search' in (params as object)))) {
+      abortSignal = params as AbortSignal;
+    } else {
+      filterParams = params as MeetingFilterParams;
+    }
+  }
+
+  const query = new URLSearchParams();
+  if (filterParams) {
+    if (filterParams.page !== undefined) query.set('page', filterParams.page.toString());
+    if (filterParams.limit !== undefined) query.set('limit', filterParams.limit.toString());
+    if (filterParams.skip !== undefined) query.set('skip', filterParams.skip.toString());
+    if (filterParams.search) query.set('search', filterParams.search);
+    if (filterParams.project_id) query.set('project_id', filterParams.project_id);
+    if (filterParams.category) query.set('category', filterParams.category);
+    if (filterParams.status) query.set('status', filterParams.status);
+    if (filterParams.start_date) query.set('start_date', filterParams.start_date);
+    if (filterParams.end_date) query.set('end_date', filterParams.end_date);
+    if (filterParams.participant) query.set('participant', filterParams.participant);
+    if (filterParams.paginate) query.set('paginate', 'true');
+  }
+  const queryString = query.toString();
+  const url = `${API_BASE_URL}/api/v1/media/meetings${queryString ? `?${queryString}` : ''}`;
+  const response = await authFetch(url, {
+    method: 'GET',
+    signal: abortSignal,
   }, true);
 
   if (!response.ok) {
@@ -368,7 +464,13 @@ export async function uploadMediaFile(
   title?: string,
   description?: string,
   onUploadProgress?: (progressPercent: number) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  extraOptions?: {
+    meetingDate?: string;
+    category?: string;
+    projectId?: string;
+    participants?: { display_name: string; email?: string; role?: string }[];
+  }
 ): Promise<IngestResponse> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
@@ -380,6 +482,12 @@ export async function uploadMediaFile(
     formData.append('file', file);
     if (title) formData.append('title', title);
     if (description) formData.append('description', description);
+    if (extraOptions?.meetingDate) formData.append('meeting_date', extraOptions.meetingDate);
+    if (extraOptions?.category) formData.append('category', extraOptions.category);
+    if (extraOptions?.projectId) formData.append('project_id', extraOptions.projectId);
+    if (extraOptions?.participants && extraOptions.participants.length > 0) {
+      formData.append('participants', JSON.stringify(extraOptions.participants));
+    }
 
     let isAborted = false;
     const onAbort = () => {
@@ -468,7 +576,13 @@ export async function ingestYouTube(
   title?: string,
   description?: string,
   confirmedAuthorization: boolean = false,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  extraOptions?: {
+    meetingDate?: string;
+    category?: string;
+    projectId?: string;
+    participants?: { display_name: string; email?: string; role?: string }[];
+  }
 ): Promise<IngestResponse> {
   const response = await authFetch(`${API_BASE_URL}/api/v1/media/youtube`, {
     method: 'POST',
@@ -479,6 +593,10 @@ export async function ingestYouTube(
       url,
       title: title || undefined,
       description: description || undefined,
+      meeting_date: extraOptions?.meetingDate || undefined,
+      category: extraOptions?.category || undefined,
+      project_id: extraOptions?.projectId || undefined,
+      participants: extraOptions?.participants || undefined,
       confirmed_authorization: confirmedAuthorization,
     }),
     signal,
@@ -502,6 +620,128 @@ export async function deleteRawMedia(assetId: string, signal?: AbortSignal): Pro
     throw new Error(data.detail || `Failed to delete media asset (${response.status})`);
   }
   return data;
+}
+
+export async function deleteMeeting(meetingId: string, signal?: AbortSignal): Promise<{ message: string; meeting_id: string }> {
+  const response = await authFetch(`${API_BASE_URL}/api/v1/media/meetings/${meetingId}`, {
+    method: 'DELETE',
+    signal,
+  }, true);
+
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.detail || `Failed to delete meeting (${response.status})`);
+  }
+  return data;
+}
+
+export async function retryProcessingJob(jobId: string, signal?: AbortSignal): Promise<ProcessingJob> {
+  const response = await authFetch(`${API_BASE_URL}/api/v1/media/jobs/${jobId}/retry`, {
+    method: 'POST',
+    signal,
+  }, true);
+
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.detail || `Failed to retry job (${response.status})`);
+  }
+  return data;
+}
+
+export function getMeetingAudioStreamUrl(meetingId: string): string {
+  return `${API_BASE_URL}/api/v1/media/meetings/${meetingId}/audio`;
+}
+
+// --- Project API Endpoints ---
+
+export async function fetchProjects(signal?: AbortSignal): Promise<ProjectItem[]> {
+  const response = await authFetch(`${API_BASE_URL}/api/v1/projects`, {
+    method: 'GET',
+    signal,
+  }, true);
+
+  if (!response.ok) {
+    const message = await extractErrorMessage(response, 'Failed to load projects');
+    throw new Error(message);
+  }
+  return await response.json();
+}
+
+export async function createProject(payload: CreateProjectPayload, signal?: AbortSignal): Promise<ProjectItem> {
+  const response = await authFetch(`${API_BASE_URL}/api/v1/projects`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    signal,
+  }, true);
+
+  if (!response.ok) {
+    const message = await extractErrorMessage(response, 'Failed to create project');
+    throw new Error(message);
+  }
+  return await response.json();
+}
+
+export async function deleteProject(projectId: string, signal?: AbortSignal): Promise<void> {
+  const response = await authFetch(`${API_BASE_URL}/api/v1/projects/${projectId}`, {
+    method: 'DELETE',
+    signal,
+  }, true);
+
+  if (!response.ok) {
+    const message = await extractErrorMessage(response, 'Failed to delete project');
+    throw new Error(message);
+  }
+}
+
+// --- Meeting Participants API Endpoints ---
+
+export async function fetchMeetingParticipants(meetingId: string, signal?: AbortSignal): Promise<MeetingParticipantItem[]> {
+  const response = await authFetch(`${API_BASE_URL}/api/v1/media/meetings/${meetingId}/participants`, {
+    method: 'GET',
+    signal,
+  }, true);
+
+  if (!response.ok) {
+    const message = await extractErrorMessage(response, 'Failed to load meeting participants');
+    throw new Error(message);
+  }
+  return await response.json();
+}
+
+export async function addMeetingParticipant(
+  meetingId: string,
+  payload: { display_name: string; email?: string; role?: string },
+  signal?: AbortSignal
+): Promise<MeetingParticipantItem> {
+  const response = await authFetch(`${API_BASE_URL}/api/v1/media/meetings/${meetingId}/participants`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    signal,
+  }, true);
+
+  if (!response.ok) {
+    const message = await extractErrorMessage(response, 'Failed to add participant');
+    throw new Error(message);
+  }
+  return await response.json();
+}
+
+export async function deleteMeetingParticipant(
+  meetingId: string,
+  participantId: string,
+  signal?: AbortSignal
+): Promise<void> {
+  const response = await authFetch(`${API_BASE_URL}/api/v1/media/meetings/${meetingId}/participants/${participantId}`, {
+    method: 'DELETE',
+    signal,
+  }, true);
+
+  if (!response.ok) {
+    const message = await extractErrorMessage(response, 'Failed to remove participant');
+    throw new Error(message);
+  }
 }
 
 // --- Protected Transcription Endpoints ---
@@ -1018,4 +1258,51 @@ export async function fetchDecisionConflicts(
   }
   return await response.json();
 }
+
+export async function downloadMeetingReportPdf(
+  meetingId: string,
+  meetingTitle?: string,
+  signal?: AbortSignal
+): Promise<void> {
+  const response = await authFetch(
+    `${API_BASE_URL}/api/v1/media/meetings/${encodeURIComponent(meetingId)}/export/pdf`,
+    {
+      method: 'GET',
+      signal,
+    },
+    true
+  );
+
+  if (!response.ok) {
+    const message = await extractErrorMessage(response, 'Failed to export meeting report PDF');
+    throw new Error(message);
+  }
+
+  const blob = await response.blob();
+  const cleanTitle = (meetingTitle || 'Meeting')
+    .replace(/[^a-zA-Z0-9_\- ]/g, '')
+    .trim()
+    .replace(/\s+/g, '_')
+    .slice(0, 40);
+  const defaultFilename = `MEMORA_Report_${cleanTitle || 'Meeting'}.pdf`;
+
+  let filename = defaultFilename;
+  const disposition = response.headers.get('content-disposition');
+  if (disposition && disposition.includes('filename=')) {
+    const match = disposition.match(/filename="?([^"]+)"?/);
+    if (match && match[1]) {
+      filename = match[1];
+    }
+  }
+
+  const url = window.URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  window.URL.revokeObjectURL(url);
+}
+
 

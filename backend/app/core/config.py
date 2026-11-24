@@ -74,7 +74,8 @@ class Settings(BaseSettings):
     GEMINI_ENABLED: bool = False
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-3.8-flash"
-    GEMINI_REQUEST_TIMEOUT_SECONDS: float = 30.0
+    GEMINI_REQUEST_TIMEOUT_SECONDS: float = 120.0
+    GEMINI_MAX_RETRIES: int = 2
 
     # System Diagnostics UI & Endpoint Gate (Developer Only, Defaults to False)
     ENABLE_SYSTEM_DIAGNOSTICS: bool = False

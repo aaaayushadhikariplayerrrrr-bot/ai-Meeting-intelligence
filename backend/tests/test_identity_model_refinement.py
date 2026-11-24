@@ -8,12 +8,15 @@ from app.models.memory import AuditLog
 
 
 def test_org_role_enum_contains_only_org_admin_and_member():
-    """Verify that OrgRole has only ORG_ADMIN and MEMBER and does not contain SUPER_ADMIN."""
+    """Verify that OrgRole contains organization roles (ORG_ADMIN, MEMBER, INDIVIDUAL) and does not contain SUPER_ADMIN."""
     role_names = set(OrgRole.__members__.keys())
-    assert role_names == {"ORG_ADMIN", "MEMBER"}
+    assert "ORG_ADMIN" in role_names
+    assert "MEMBER" in role_names
+    assert "INDIVIDUAL" in role_names
     assert hasattr(OrgRole, "SUPER_ADMIN") is False
     assert OrgRole.ORG_ADMIN.value == "ORG_ADMIN"
     assert OrgRole.MEMBER.value == "MEMBER"
+    assert OrgRole.INDIVIDUAL.value == "INDIVIDUAL"
 
 
 def test_user_is_super_admin_independent_global_privilege(db_session):

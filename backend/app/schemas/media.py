@@ -36,6 +36,25 @@ class ProcessingJobResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class MeetingParticipantCreate(BaseModel):
+    display_name: str = Field(..., min_length=1, max_length=255)
+    email: Optional[str] = Field(None, max_length=255)
+    role: Optional[str] = Field(None, max_length=50)
+    user_id: Optional[str] = None
+
+
+class MeetingParticipantResponse(BaseModel):
+    id: str
+    meeting_id: str
+    user_id: Optional[str] = None
+    display_name: str
+    email: Optional[str] = None
+    role: Optional[str] = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class MeetingResponse(BaseModel):
     id: str
     organization_id: str
@@ -45,16 +64,36 @@ class MeetingResponse(BaseModel):
     source_url_or_reference: Optional[str] = None
     status: str
     created_at: datetime
+    scheduled_start_time: Optional[datetime] = None
+    actual_start_time: Optional[datetime] = None
+    actual_end_time: Optional[datetime] = None
+    category: Optional[str] = None
+    project_id: Optional[str] = None
+    project_name: Optional[str] = None
     media_assets: List[MediaAssetResponse] = []
     processing_jobs: List[ProcessingJobResponse] = []
+    participants: List[MeetingParticipantResponse] = []
+    transcript_types: List[str] = []
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class PaginatedMeetingsResponse(BaseModel):
+    items: List[MeetingResponse]
+    total: int
+    page: int
+    pages: int
+    limit: int
 
 
 class YouTubeIngestRequest(BaseModel):
     url: str = Field(..., description="Valid YouTube watch/share URL")
     title: Optional[str] = Field(None, description="Optional custom title for the meeting")
     description: Optional[str] = Field(None, description="Optional description")
+    meeting_date: Optional[str] = Field(None, description="ISO datetime string for actual meeting occurrence")
+    category: Optional[str] = Field(None, description="Business meeting category")
+    project_id: Optional[str] = Field(None, description="Associated Project UUID")
+    participants: Optional[List[MeetingParticipantCreate]] = Field(None, description="List of meeting participants")
     confirmed_authorization: bool = Field(
         False,
         description="Explicit confirmation that user has legal authorization to process this content"

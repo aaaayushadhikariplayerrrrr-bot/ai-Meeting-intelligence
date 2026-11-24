@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import {
   Sparkles,
   Search,
@@ -21,9 +21,16 @@ import {
   ChevronDown,
   ChevronUp,
   Clock,
+  ExternalLink,
+  Globe,
+  BookOpen,
+  FileAudio,
+  AlertCircle,
+  Users,
 } from 'lucide-react';
 import type {
   MeetingItem,
+  ProjectItem,
   MemoryQueryResponse,
   MemorySearchResponse,
   AbstentionStatus,
@@ -49,27 +56,134 @@ import { PotentialConflictsView } from './cross_meeting/PotentialConflictsView';
 
 interface OrganizationalMemoryViewProps {
   meetings: MeetingItem[];
+  projects?: ProjectItem[];
   onNavigateToEvidence: (meetingId: string, segmentId: string, timestampSeconds?: number | null) => void;
   currentOrgName?: string;
   currentOrgRole?: string;
   currentOrgId?: string;
+  initialMeetingId?: string;
+  initialProjectId?: string;
+  focusInputTrigger?: number;
 }
 
-const EXAMPLE_QUESTIONS = [
-  'What container orchestration system was adopted across production services?',
-  'What decisions were made regarding Redis distributed caching?',
-  'What API rate limits are enforced for authenticated tenants?',
-  'What was discussed regarding two-factor authentication policies?',
-];
+const renderInlineMarkdown = (text: string): React.ReactNode => {
+  const parts: React.ReactNode[] = [];
+  const regex = /(\*\*.*?\*\*|\*.*?\*|\[.*?\]\(.*?\))/g;
+  let lastIdx = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIdx) {
+      parts.push(text.slice(lastIdx, match.index));
+    }
+    const token = match[0];
+    if (token.startsWith('**') && token.endsWith('**')) {
+      parts.push(<strong key={match.index}>{token.slice(2, -2)}</strong>);
+    } else if (token.startsWith('*') && token.endsWith('*')) {
+      parts.push(<em key={match.index}>{token.slice(1, -1)}</em>);
+    } else if (token.startsWith('[') && token.includes('](') && token.endsWith(')')) {
+      const splitIdx = token.indexOf('](');
+      const label = token.slice(1, splitIdx);
+      const url = token.slice(splitIdx + 2, -1);
+      parts.push(
+        <a key={match.index} href={url} target="_blank" rel="noopener noreferrer" className="memory-ext-link">
+          {label} <ExternalLink size={11} style={{ display: 'inline', verticalAlign: 'middle', marginLeft: '2px' }} />
+        </a>
+      );
+    }
+    lastIdx = regex.lastIndex;
+  }
+  if (lastIdx < text.length) {
+    parts.push(text.slice(lastIdx));
+  }
+  return parts.length > 0 ? parts : text;
+};
+
+const renderFormattedAnswer = (text: string) => {
+  if (!text) return null;
+
+  const lines = text.split('\n');
+  const elements: React.ReactNode[] = [];
+  let listItems: string[] = [];
+
+  const flushList = (keyPrefix: string) => {
+    if (listItems.length > 0) {
+      elements.push(
+        <ul key={`${keyPrefix}-ul`} className="memory-answer-list">
+          {listItems.map((li, idx) => (
+            <li key={idx}>{renderInlineMarkdown(li)}</li>
+          ))}
+        </ul>
+      );
+      listItems = [];
+    }
+  };
+
+  lines.forEach((line, i) => {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      flushList(`flush-${i}`);
+      return;
+    }
+
+    if (trimmed.startsWith('### ')) {
+      flushList(`h3-${i}`);
+      elements.push(
+        <h4 key={`h3-${i}`} className="memory-answer-heading">
+          {trimmed.slice(4)}
+        </h4>
+      );
+    } else if (trimmed.startsWith('## ')) {
+      flushList(`h2-${i}`);
+      elements.push(
+        <h3 key={`h2-${i}`} className="memory-answer-heading-lg">
+          {trimmed.slice(3)}
+        </h3>
+      );
+    } else if (trimmed.startsWith('> ')) {
+      flushList(`quote-${i}`);
+      elements.push(
+        <blockquote key={`quote-${i}`} className="memory-answer-blockquote">
+          {renderInlineMarkdown(trimmed.slice(2))}
+        </blockquote>
+      );
+    } else if (trimmed.startsWith('- ') || trimmed.startsWith('• ') || trimmed.startsWith('* ')) {
+      listItems.push(trimmed.slice(2));
+    } else {
+      flushList(`p-${i}`);
+      elements.push(
+        <p key={`p-${i}`} className="memory-answer-paragraph">
+          {renderInlineMarkdown(trimmed)}
+        </p>
+      );
+    }
+  });
+
+  flushList('final-flush');
+  return <div className="memory-formatted-content">{elements}</div>;
+};
 
 export const OrganizationalMemoryView: React.FC<OrganizationalMemoryViewProps> = ({
   meetings,
+  projects = [],
   onNavigateToEvidence,
   currentOrgName,
   currentOrgRole,
   currentOrgId,
+  initialMeetingId,
+  initialProjectId,
+  focusInputTrigger,
 }) => {
   const [activeMode, setActiveMode] = useState<'ask' | 'search' | 'decisions' | 'commitments' | 'questions' | 'conflicts'>('ask');
+  const [selectedProjectId, setSelectedProjectId] = useState<string>(initialProjectId || '');
+  const [savedHistory, setSavedHistory] = useState<string[]>(() => {
+    try {
+      const stored = localStorage.getItem('memora_ask_ai_history');
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
 
   // --- Insights Stats State ---
   const [stats, setStats] = useState<OrganizationalInsightsStats | null>(null);
@@ -79,7 +193,34 @@ export const OrganizationalMemoryView: React.FC<OrganizationalMemoryViewProps> =
 
   // --- Ask AI State ---
   const [question, setQuestion] = useState('');
-  const [askMeetingId, setAskMeetingId] = useState<string>('');
+  const [askMeetingId, setAskMeetingId] = useState<string>(initialMeetingId || '');
+
+  // Synchronize initial meeting / project / focus trigger changes
+  useEffect(() => {
+    if (initialMeetingId) {
+      setAskMeetingId(initialMeetingId);
+    }
+  }, [initialMeetingId]);
+
+  useEffect(() => {
+    if (initialProjectId) {
+      setSelectedProjectId(initialProjectId);
+    }
+  }, [initialProjectId]);
+
+  useEffect(() => {
+    if (focusInputTrigger) {
+      setActiveMode('ask');
+      const timer = setTimeout(() => {
+        const inputEl = document.getElementById('memory-question-input') as HTMLTextAreaElement | null;
+        if (inputEl) {
+          inputEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          inputEl.focus();
+        }
+      }, 60);
+      return () => clearTimeout(timer);
+    }
+  }, [focusInputTrigger]);
   const [askStartDate, setAskStartDate] = useState<string>('');
   const [askEndDate, setAskEndDate] = useState<string>('');
   const [maxEvidenceChunks, setMaxEvidenceChunks] = useState<number>(5);
@@ -112,6 +253,120 @@ export const OrganizationalMemoryView: React.FC<OrganizationalMemoryViewProps> =
     const secs = Math.floor(seconds % 60);
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
+
+  // Context-aware suggested questions for Ask AI
+  const suggestedQuestions = useMemo(() => {
+    const selectedMeeting = askMeetingId ? meetings.find((m) => m.id === askMeetingId) : null;
+    const selectedProject = selectedProjectId ? projects.find((p) => p.id === selectedProjectId) : null;
+
+    if (selectedMeeting) {
+      return [
+        {
+          category: 'Decisions',
+          text: `What were the most important decisions in "${selectedMeeting.title}"?`,
+          icon: <CheckCircle2 size={12} color="#34d399" />,
+        },
+        {
+          category: 'Action Items',
+          text: `What are the pending action items from this meeting?`,
+          icon: <Clock size={12} color="#60a5fa" />,
+        },
+        {
+          category: 'Responsibilities',
+          text: `What responsibilities were assigned to each participant in this meeting?`,
+          icon: <Users size={12} color="#a78bfa" />,
+        },
+        {
+          category: 'Unresolved',
+          text: `What unresolved questions or open risks remain from this meeting?`,
+          icon: <HelpCircle size={12} color="#f59e0b" />,
+        },
+        {
+          category: 'External & Legal',
+          text: `Explain any technical terms or legal amendments mentioned in this meeting.`,
+          icon: <Globe size={12} color="#38bdf8" />,
+        },
+        {
+          category: 'Topics',
+          text: `What was discussed regarding key agenda topics in "${selectedMeeting.title}"?`,
+          icon: <BookOpen size={12} color="#ec4899" />,
+        },
+      ];
+    }
+
+    if (selectedProject) {
+      return [
+        {
+          category: 'Decisions',
+          text: `What key decisions were made across ${selectedProject.name}?`,
+          icon: <CheckCircle2 size={12} color="#34d399" />,
+        },
+        {
+          category: 'Evolution',
+          text: `What changed between the previous and latest meetings in ${selectedProject.name}?`,
+          icon: <GitBranch size={12} color="#818cf8" />,
+        },
+        {
+          category: 'Action Items',
+          text: `What are the pending action items and commitments for ${selectedProject.name}?`,
+          icon: <Clock size={12} color="#60a5fa" />,
+        },
+        {
+          category: 'Responsibilities',
+          text: `What responsibilities were assigned to each participant in ${selectedProject.name}?`,
+          icon: <Users size={12} color="#a78bfa" />,
+        },
+        {
+          category: 'Unresolved',
+          text: `What contradictory decisions or unresolved questions exist in ${selectedProject.name}?`,
+          icon: <HelpCircle size={12} color="#f59e0b" />,
+        },
+        {
+          category: 'Technical',
+          text: `Explain the technical specifications or architecture adopted in ${selectedProject.name}.`,
+          icon: <Globe size={12} color="#38bdf8" />,
+        },
+      ];
+    }
+
+    return [
+      {
+        category: 'Decisions',
+        text: 'What were the most important decisions across recent meetings?',
+        icon: <CheckCircle2 size={12} color="#34d399" />,
+      },
+      {
+        category: 'Action Items',
+        text: 'What are the pending action items and who is responsible for each?',
+        icon: <Clock size={12} color="#60a5fa" />,
+      },
+      {
+        category: 'Evolution',
+        text: 'What changed between the previous and latest meetings?',
+        icon: <GitBranch size={12} color="#818cf8" />,
+      },
+      {
+        category: 'Responsibilities',
+        text: 'What responsibilities were assigned to each participant?',
+        icon: <Users size={12} color="#a78bfa" />,
+      },
+      {
+        category: 'Unresolved',
+        text: 'What unresolved questions or open issues remain across meetings?',
+        icon: <HelpCircle size={12} color="#f59e0b" />,
+      },
+      {
+        category: 'External & Legal',
+        text: 'Explain the 103rd Constitutional Amendment or other technical terms mentioned.',
+        icon: <Globe size={12} color="#38bdf8" />,
+      },
+      {
+        category: 'Topics',
+        text: 'What was discussed about infrastructure, deployment, and security?',
+        icon: <BookOpen size={12} color="#ec4899" />,
+      },
+    ];
+  }, [askMeetingId, selectedProjectId, meetings, projects]);
 
   // --- Load Live Insights Stats ---
   const loadStats = useCallback(async () => {
@@ -215,18 +470,28 @@ export const OrganizationalMemoryView: React.FC<OrganizationalMemoryViewProps> =
   }, [loadStats, currentOrgId]);
 
   // --- Handle Ask AI Submission ---
-  const handleAskSubmit = useCallback(async (e?: React.FormEvent) => {
+  const handleAskSubmit = useCallback(async (e?: React.FormEvent, overrideQuestion?: string) => {
     if (e) e.preventDefault();
-    const cleanQ = question.trim();
+    const cleanQ = (overrideQuestion !== undefined ? overrideQuestion : question).trim();
     if (!cleanQ) {
       setQueryError('Please enter a question to ask organizational memory.');
       return;
     }
+    setQuestion(cleanQ);
 
     if (askStartDate && askEndDate && askStartDate > askEndDate) {
       setQueryError('Start date cannot be later than end date.');
       return;
     }
+
+    // Update saved history
+    setSavedHistory((prev) => {
+      const next = [cleanQ, ...prev.filter((q) => q !== cleanQ)].slice(0, 8);
+      try {
+        localStorage.setItem('memora_ask_ai_history', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
 
     // Cancel in-flight query request if any
     if (queryAbortControllerRef.current) {
@@ -245,6 +510,7 @@ export const OrganizationalMemoryView: React.FC<OrganizationalMemoryViewProps> =
         {
           question: cleanQ,
           meeting_id: askMeetingId || undefined,
+          project_id: selectedProjectId || undefined,
           start_date: askStartDate ? new Date(askStartDate).toISOString() : undefined,
           end_date: askEndDate ? new Date(askEndDate).toISOString() : undefined,
           max_evidence_chunks: maxEvidenceChunks,
@@ -263,7 +529,7 @@ export const OrganizationalMemoryView: React.FC<OrganizationalMemoryViewProps> =
         setIsLoadingQuery(false);
       }
     }
-  }, [question, askMeetingId, askStartDate, askEndDate, maxEvidenceChunks]);
+  }, [question, askMeetingId, selectedProjectId, askStartDate, askEndDate, maxEvidenceChunks]);
 
   // --- Handle Search Submission ---
   const handleSearchSubmit = useCallback(async (e?: React.FormEvent) => {
@@ -296,6 +562,7 @@ export const OrganizationalMemoryView: React.FC<OrganizationalMemoryViewProps> =
         {
           query: cleanQ,
           meeting_id: searchMeetingId || undefined,
+          project_id: selectedProjectId || undefined,
           start_date: searchStartDate ? new Date(searchStartDate).toISOString() : undefined,
           end_date: searchEndDate ? new Date(searchEndDate).toISOString() : undefined,
           limit: 20,
@@ -314,7 +581,7 @@ export const OrganizationalMemoryView: React.FC<OrganizationalMemoryViewProps> =
         setIsLoadingSearch(false);
       }
     }
-  }, [searchQuery, searchMeetingId, searchStartDate, searchEndDate]);
+  }, [searchQuery, searchMeetingId, selectedProjectId, searchStartDate, searchEndDate]);
 
   // Render provider badge
   const renderProviderBadge = (providerUsed: string, isHeuristic: boolean) => {
@@ -610,26 +877,100 @@ export const OrganizationalMemoryView: React.FC<OrganizationalMemoryViewProps> =
               data-testid="memory-question-input"
             />
 
-            {/* Example Prompts */}
-            <div className="memory-examples-row">
-              <span className="memory-examples-label">Try asking:</span>
-              {EXAMPLE_QUESTIONS.map((ex, i) => (
-                <button
-                  key={i}
-                  type="button"
-                  className="memory-example-btn"
-                  onClick={() => {
-                    setQuestion(ex);
-                    if (queryError) setQueryError(null);
-                  }}
-                >
-                  "{ex}"
-                </button>
-              ))}
+            {/* Suggested Questions Section */}
+            <div className="memory-suggested-section" data-testid="suggested-questions-section">
+              <div className="memory-suggested-header">
+                <span className="memory-examples-label" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                  <Sparkles size={12} color="#818cf8" /> Suggested Questions:
+                </span>
+                <span className="memory-suggested-hint">
+                  {askMeetingId ? 'Adapted to selected meeting' : selectedProjectId ? 'Adapted to selected project' : 'Click to populate or run'}
+                </span>
+              </div>
+              <div className="memory-suggested-pills-grid">
+                {suggestedQuestions.map((sug, i) => (
+                  <div key={i} className="memory-suggested-chip">
+                    <button
+                      type="button"
+                      className="memory-example-btn memory-suggested-btn"
+                      onClick={() => {
+                        setQuestion(sug.text);
+                        if (queryError) setQueryError(null);
+                      }}
+                      title="Click to populate question into input"
+                    >
+                      <span className="suggested-chip-icon">{sug.icon}</span>
+                      <span className="suggested-chip-category">{sug.category}:</span>
+                      <span className="suggested-chip-text">"{sug.text}"</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="memory-suggested-quick-run"
+                      onClick={() => handleAskSubmit(undefined, sug.text)}
+                      title="Directly Ask AI this question"
+                      aria-label={`Directly ask: ${sug.text}`}
+                    >
+                      <ArrowRight size={11} />
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
+
+            {/* Saved Recent Questions */}
+            {savedHistory.length > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap', margin: '0.4rem 0' }}>
+                <span style={{ fontSize: '0.7rem', color: '#64748b', display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
+                  <Clock size={11} /> Recent:
+                </span>
+                {savedHistory.map((item, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => {
+                      setQuestion(item);
+                      if (queryError) setQueryError(null);
+                    }}
+                    style={{
+                      background: 'rgba(255, 255, 255, 0.04)',
+                      border: '1px solid rgba(255, 255, 255, 0.08)',
+                      borderRadius: '12px',
+                      padding: '0.15rem 0.55rem',
+                      fontSize: '0.7rem',
+                      color: '#cbd5e1',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {item.length > 40 ? item.slice(0, 38) + '...' : item}
+                  </button>
+                ))}
+              </div>
+            )}
 
             {/* Scope & Date Filters */}
             <div className="memory-filters-row">
+              {projects.length > 0 && (
+                <div className="memory-filter-item">
+                  <label className="memory-filter-label" htmlFor="ask-project-filter">
+                    Scope to Project:
+                  </label>
+                  <select
+                    id="ask-project-filter"
+                    className="memory-select"
+                    value={selectedProjectId}
+                    onChange={(e) => setSelectedProjectId(e.target.value)}
+                    data-testid="ask-project-filter"
+                  >
+                    <option value="">All Projects Across Organization</option>
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <div className="memory-filter-item">
                 <label className="memory-filter-label" htmlFor="ask-meeting-filter">
                   Scope to Meeting:
@@ -742,6 +1083,71 @@ export const OrganizationalMemoryView: React.FC<OrganizationalMemoryViewProps> =
           {/* Query Response Section */}
           {queryResponse && !isLoadingQuery && (
             <div className="memory-answer-card" data-testid="query-response-card">
+              {/* Answer Source Indicator Banner */}
+              {(() => {
+                const sourceType = queryResponse.answer_source_type || (() => {
+                  const hasExt = Boolean(queryResponse.external_knowledge && queryResponse.external_knowledge.is_available);
+                  const hasEv = Boolean(
+                    queryResponse.citations.length > 0 ||
+                    (queryResponse.structured_decisions && queryResponse.structured_decisions.length > 0) ||
+                    (queryResponse.structured_commitments && queryResponse.structured_commitments.length > 0)
+                  );
+                  if (queryResponse.is_abstained || (!hasEv && !hasExt)) return 'INSUFFICIENT_EVIDENCE';
+                  if (hasEv && hasExt) return 'COMBINED';
+                  if (hasExt && !hasEv) return 'EXTERNAL_KNOWLEDGE';
+                  return 'MEETING_EVIDENCE';
+                })();
+
+                return (
+                  <div
+                    className={`memory-source-indicator-banner source-${sourceType.toLowerCase()}`}
+                    data-testid="answer-source-indicator"
+                  >
+                    <div className="source-indicator-header">
+                      <div className="source-indicator-badge">
+                        {sourceType === 'MEETING_EVIDENCE' && (
+                          <>
+                            <FileAudio size={14} color="#34d399" />
+                            <span className="source-label">Source: Meeting Evidence</span>
+                          </>
+                        )}
+                        {sourceType === 'EXTERNAL_KNOWLEDGE' && (
+                          <>
+                            <Globe size={14} color="#38bdf8" />
+                            <span className="source-label">Source: External Knowledge</span>
+                          </>
+                        )}
+                        {sourceType === 'COMBINED' && (
+                          <>
+                            <Sparkles size={14} color="#c084fc" />
+                            <span className="source-label">Source: Combined Answer</span>
+                          </>
+                        )}
+                        {sourceType === 'INSUFFICIENT_EVIDENCE' && (
+                          <>
+                            <AlertCircle size={14} color="#fbbf24" />
+                            <span className="source-label">Source: Insufficient Evidence</span>
+                          </>
+                        )}
+                      </div>
+                      <span className="source-indicator-type-tag">
+                        {sourceType.replace('_', ' ')}
+                      </span>
+                    </div>
+                    <div className="source-indicator-desc">
+                      {sourceType === 'MEETING_EVIDENCE' &&
+                        'Information retrieved and verified directly from organization meeting transcripts.'}
+                      {sourceType === 'EXTERNAL_KNOWLEDGE' &&
+                        'Information obtained from external knowledge sources to explain subjects mentioned in meetings.'}
+                      {sourceType === 'COMBINED' &&
+                        'Both meeting evidence and external knowledge were used to synthesize this answer.'}
+                      {sourceType === 'INSUFFICIENT_EVIDENCE' &&
+                        'Available meeting records and external knowledge do not provide sufficient verified evidence.'}
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* Answer Header Bar */}
               <div className="memory-answer-header">
                 <div className="memory-answer-badges">
@@ -801,8 +1207,82 @@ export const OrganizationalMemoryView: React.FC<OrganizationalMemoryViewProps> =
 
               {/* Answer Text */}
               <div className="memory-answer-text" data-testid="query-answer-text">
-                {queryResponse.answer}
+                {renderFormattedAnswer(queryResponse.answer)}
               </div>
+
+              {/* Dedicated External Background Knowledge Card */}
+              {queryResponse.external_knowledge && (
+                <div className="memory-external-knowledge-card" data-testid="external-knowledge-card">
+                  <div className="memory-external-knowledge-header">
+                    <div className="memory-external-knowledge-badge">
+                      <Globe size={15} color="#3b82f6" />
+                      <span>External Background Reference — Context Not Discussed in Meeting</span>
+                    </div>
+                    <span className="intel-version-badge" style={{ textTransform: 'uppercase' }}>
+                      {queryResponse.external_knowledge.provider_used}
+                    </span>
+                  </div>
+
+                  {/* Non-alarmist honest disclaimer */}
+                  <div className="memory-external-disclaimer" data-testid="external-knowledge-disclaimer">
+                    <Info size={14} color="#3b82f6" style={{ flexShrink: 0, marginTop: '2px' }} />
+                    <span>{queryResponse.external_knowledge.disclaimer}</span>
+                  </div>
+
+                  {queryResponse.external_knowledge.is_available ? (
+                    <>
+                      <div className="memory-external-subject-title">
+                        Subject: <strong>{queryResponse.external_knowledge.subject}</strong>
+                      </div>
+
+                      <div className="memory-external-summary" data-testid="external-knowledge-summary">
+                        {queryResponse.external_knowledge.summary}
+                      </div>
+
+                      {queryResponse.external_knowledge.key_facts && queryResponse.external_knowledge.key_facts.length > 0 && (
+                        <div className="memory-external-facts-section">
+                          <div className="memory-external-facts-title">Key Facts & Background:</div>
+                          <ul className="memory-external-facts-list" data-testid="external-knowledge-facts">
+                            {queryResponse.external_knowledge.key_facts.map((fact, fIdx) => (
+                              <li key={fIdx}>{fact}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {queryResponse.external_knowledge.citations && queryResponse.external_knowledge.citations.length > 0 && (
+                        <div className="memory-external-citations-section">
+                          <div className="memory-external-facts-title">Reliable External Sources:</div>
+                          <div className="memory-external-sources-list" data-testid="external-knowledge-sources">
+                            {queryResponse.external_knowledge.citations.map((c, cIdx) => (
+                              <a
+                                key={cIdx}
+                                href={c.source_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="memory-external-source-pill"
+                                data-testid={`external-source-${cIdx}`}
+                              >
+                                <BookOpen size={12} />
+                                <span>{c.source_title}</span>
+                                <ExternalLink size={11} />
+                              </a>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="memory-external-unavailable-box" data-testid="external-knowledge-unavailable">
+                      <AlertTriangle size={15} color="#f59e0b" />
+                      <span>
+                        External background retrieval for <strong>'{queryResponse.external_knowledge.subject}'</strong> was unavailable
+                        {queryResponse.external_knowledge.unavailability_reason ? ` (${queryResponse.external_knowledge.unavailability_reason})` : ''}.
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Fallback Warning if heuristic fallback used */}
               {queryResponse.diagnostics.fallback_warning && (
@@ -1542,6 +2022,28 @@ export const OrganizationalMemoryView: React.FC<OrganizationalMemoryViewProps> =
 
             {/* Scope & Date Filters */}
             <div className="memory-filters-row">
+              {projects.length > 0 && (
+                <div className="memory-filter-item">
+                  <label className="memory-filter-label" htmlFor="search-project-filter">
+                    Project Scope:
+                  </label>
+                  <select
+                    id="search-project-filter"
+                    className="memory-select"
+                    value={selectedProjectId}
+                    onChange={(e) => setSelectedProjectId(e.target.value)}
+                    data-testid="search-project-filter"
+                  >
+                    <option value="">All Projects Across Organization</option>
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <div className="memory-filter-item">
                 <label className="memory-filter-label" htmlFor="search-meeting-filter">
                   Meeting Scope:

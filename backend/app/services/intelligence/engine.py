@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 from typing import Optional, List, Dict, Any, Tuple
 from uuid import uuid4
 from datetime import datetime, timezone
@@ -192,36 +193,110 @@ def extract_meeting_intelligence(
     chunk_payloads: List[StructuredExtractionPayload] = []
 
     # 5. Execute extraction per chunk
-    for chunk in chunks:
+    for chunk_idx, chunk in enumerate(chunks, 1):
         if raw_provider == ProviderType.GEMINI.value:
+            t0 = time.time()
             try:
                 payload = gemini.extract(
                     segments=chunk,
                     meeting_title=meeting.title,
                     output_language=target_lang,
                 )
+                duration = time.time() - t0
+                provider_used = ProviderType.GEMINI.value
+                logger.info(
+                    f"Gemini extraction succeeded for meeting '{meeting.id}' "
+                    f"(chunk {chunk_idx}/{len(chunks)}, segments={len(chunk)}, "
+                    f"duration={duration:.2f}s, model={gemini.model_name})."
+                )
             except ProviderExecutionError as pe:
-                if allow_fallback:
-                    logger.warning(f"Gemini extraction failed: {pe}. Falling back to deterministic extractor.")
+                duration = time.time() - t0
+                if not allow_fallback:
+                    raise
+
+                logger.warning(
+                    f"Gemini extraction failed for meeting '{meeting.id}' "
+                    f"(chunk {chunk_idx}/{len(chunks)}, duration={duration:.2f}s, "
+                    f"error={str(pe)}). Attempting Ollama fallback."
+                )
+
+                # Tier 2: Attempt Ollama fallback if configured or provided
+                ollama_succeeded = False
+                ollama_error_str = None
+                is_ollama_configured = bool(
+                    (ollama_extractor is not None)
+                    or (getattr(settings, "OLLAMA_BASE_URL", None) and getattr(settings, "LLM_MODEL_NAME", None))
+                )
+
+                if is_ollama_configured and ollama:
+                    t_ollama = time.time()
+                    try:
+                        payload = ollama.extract(
+                            segments=chunk,
+                            meeting_title=meeting.title,
+                            output_language=target_lang,
+                        )
+                        ollama_duration = time.time() - t_ollama
+                        provider_used = ProviderType.OLLAMA.value
+                        model_label = getattr(ollama, "model_name", "qwen3:8b")
+                        fallback_warning = (
+                            f"Gemini extraction failed ({str(pe)}). "
+                            f"Local Ollama ({model_label}) was used as fallback."
+                        )
+                        logger.info(
+                            f"Ollama fallback extraction succeeded for meeting '{meeting.id}' "
+                            f"(chunk {chunk_idx}/{len(chunks)}, duration={ollama_duration:.2f}s, model={model_label})."
+                        )
+                        ollama_succeeded = True
+                    except Exception as oe:
+                        ollama_duration = time.time() - t_ollama
+                        ollama_error_str = str(oe)
+                        logger.warning(
+                            f"Ollama fallback extraction failed for meeting '{meeting.id}' "
+                            f"(chunk {chunk_idx}/{len(chunks)}, duration={ollama_duration:.2f}s, "
+                            f"error={ollama_error_str}). Executing deterministic extractor fallback."
+                        )
+
+                # Tier 3: Deterministic fallback if Ollama was not available or failed
+                if not ollama_succeeded:
                     payload = deterministic.extract(
                         segments=chunk,
                         meeting_title=meeting.title,
                         output_language=target_lang,
                     )
                     provider_used = ProviderType.DETERMINISTIC.value
-                    fallback_warning = f"Gemini extraction failed ({str(pe)}). Deterministic extractor was used as fallback."
-                else:
-                    raise
+                    if ollama_error_str:
+                        fallback_warning = (
+                            f"Gemini extraction failed ({str(pe)}). "
+                            f"Local Ollama fallback failed ({ollama_error_str}). "
+                            f"Deterministic extractor was used as fallback."
+                        )
+                    else:
+                        fallback_warning = (
+                            f"Gemini extraction failed ({str(pe)}). "
+                            f"Deterministic extractor was used as fallback."
+                        )
         elif raw_provider == ProviderType.OLLAMA.value:
+            t0 = time.time()
             try:
                 payload = ollama.extract(
                     segments=chunk,
                     meeting_title=meeting.title,
                     output_language=target_lang,
                 )
+                duration = time.time() - t0
+                logger.info(
+                    f"Ollama extraction succeeded for meeting '{meeting.id}' "
+                    f"(chunk {chunk_idx}/{len(chunks)}, segments={len(chunk)}, duration={duration:.2f}s)."
+                )
             except ProviderExecutionError as pe:
+                duration = time.time() - t0
                 if allow_fallback:
-                    logger.warning(f"Ollama extraction failed: {pe}. Falling back to deterministic extractor.")
+                    logger.warning(
+                        f"Ollama extraction failed for meeting '{meeting.id}' "
+                        f"(chunk {chunk_idx}/{len(chunks)}, duration={duration:.2f}s, "
+                        f"error={str(pe)}). Executing deterministic extractor fallback."
+                    )
                     payload = deterministic.extract(
                         segments=chunk,
                         meeting_title=meeting.title,

@@ -28,6 +28,7 @@ import {
   revokeDecision,
   isAbortError,
 } from '../../services/api';
+import { DecisionLineageGraph } from './DecisionLineageGraph';
 
 interface DecisionHistoryViewProps {
   meetings: MeetingItem[];
@@ -52,6 +53,7 @@ export const DecisionHistoryView: React.FC<DecisionHistoryViewProps> = ({
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
+  const [showLineageGraph, setShowLineageGraph] = useState<boolean>(true);
 
   // Expanded Lineage Map
   const [expandedLineage, setExpandedLineage] = useState<Record<string, boolean>>({});
@@ -357,6 +359,16 @@ export const DecisionHistoryView: React.FC<DecisionHistoryViewProps> = ({
             Clear Dates
           </button>
         )}
+
+        <button
+          type="button"
+          className="intel-btn-sm"
+          style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+          onClick={() => setShowLineageGraph((prev) => !prev)}
+        >
+          <Layers size={13} />
+          <span>{showLineageGraph ? 'Hide Lineage Graph' : 'Show Lineage Graph'}</span>
+        </button>
       </div>
 
       {/* Error state */}
@@ -368,6 +380,14 @@ export const DecisionHistoryView: React.FC<DecisionHistoryViewProps> = ({
             Retry
           </button>
         </div>
+      )}
+
+      {/* Interactive Visual Decision Lineage Graph */}
+      {showLineageGraph && decisions.length > 0 && (
+        <DecisionLineageGraph
+          decisions={decisions}
+          onNavigateToEvidence={onNavigateToEvidence}
+        />
       )}
 
       {/* Decisions List */}
@@ -527,12 +547,12 @@ export const DecisionHistoryView: React.FC<DecisionHistoryViewProps> = ({
                       <span>Link Superseded</span>
                     </button>
 
-                    {/* Revoke button: Only active decisions can be revoked; requires ORG_ADMIN if role specified */}
+                    {/* Revoke button: Only active decisions can be revoked; requires ORG_ADMIN or INDIVIDUAL if role specified */}
                     {decision.status === 'ACTIVE' && (
                       <button
                         type="button"
                         className="intel-btn-sm danger"
-                        disabled={currentOrgRole !== undefined && currentOrgRole !== 'ORG_ADMIN'}
+                        disabled={currentOrgRole !== undefined && !['ORG_ADMIN', 'INDIVIDUAL'].includes(currentOrgRole)}
                         onClick={() => {
                           setRevokeModalTarget(decision);
                           setRevokeReason('');
@@ -540,7 +560,7 @@ export const DecisionHistoryView: React.FC<DecisionHistoryViewProps> = ({
                         }}
                         data-testid={`revoke-btn-${decision.id}`}
                         title={
-                          currentOrgRole !== undefined && currentOrgRole !== 'ORG_ADMIN'
+                          currentOrgRole !== undefined && !['ORG_ADMIN', 'INDIVIDUAL'].includes(currentOrgRole)
                             ? 'Admin privileges required to revoke organizational decisions'
                             : 'Revoke this decision with an audited reason'
                         }

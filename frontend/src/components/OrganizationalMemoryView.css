@@ -683,3 +683,381 @@
 .intel-conflict-card:hover {
   border-color: #f59e0b;
 }
+
+/* Phase 8.9.6: Formatted Ask AI Answer & External Knowledge Card */
+.memory-formatted-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  line-height: 1.6;
+}
+
+.memory-answer-heading {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #818cf8;
+  margin-top: 0.5rem;
+  margin-bottom: 0.2rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid rgba(129, 140, 248, 0.15);
+}
+
+.memory-answer-heading-lg {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-top: 0.75rem;
+  margin-bottom: 0.35rem;
+}
+
+.memory-answer-paragraph {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 0.92rem;
+}
+
+.memory-answer-list {
+  margin: 0.2rem 0 0.5rem 1.25rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  color: var(--text-primary);
+  font-size: 0.9rem;
+}
+
+.memory-answer-blockquote {
+  margin: 0.4rem 0;
+  padding: 0.5rem 0.85rem;
+  background: rgba(99, 102, 241, 0.06);
+  border-left: 3px solid #6366f1;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  color: var(--text-secondary);
+  font-size: 0.88rem;
+  font-style: italic;
+}
+
+.memory-ext-link {
+  color: #38bdf8;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: color 0.15s ease;
+}
+
+.memory-ext-link:hover {
+  color: #7dd3fc;
+}
+
+/* Dedicated External Background Knowledge Card */
+.memory-external-knowledge-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  padding: 1.15rem;
+  background: rgba(59, 130, 246, 0.04);
+  border: 1px solid rgba(59, 130, 246, 0.22);
+  border-radius: var(--radius-md);
+  transition: border-color 0.2s ease;
+}
+
+.memory-external-knowledge-card:hover {
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+.memory-external-knowledge-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.memory-external-knowledge-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #60a5fa;
+  letter-spacing: 0.01em;
+}
+
+.memory-external-disclaimer {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.6rem 0.85rem;
+  background: rgba(59, 130, 246, 0.07);
+  border: 1px solid rgba(59, 130, 246, 0.18);
+  border-radius: var(--radius-sm);
+  color: #bfdbfe;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.memory-external-subject-title {
+  font-size: 0.92rem;
+  color: var(--text-primary);
+}
+
+.memory-external-summary {
+  font-size: 0.9rem;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.memory-external-facts-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.25rem;
+}
+
+.memory-external-facts-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #94a3b8;
+}
+
+.memory-external-facts-list {
+  margin: 0 0 0 1.25rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.88rem;
+  color: var(--text-primary);
+}
+
+.memory-external-citations-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+}
+
+.memory-external-sources-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.memory-external-source-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.7rem;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.28);
+  border-radius: var(--radius-sm);
+  color: #93c5fd;
+  font-size: 0.8rem;
+  text-decoration: none;
+  transition: all 0.15s ease-in-out;
+}
+
+.memory-external-source-pill:hover {
+  background: rgba(59, 130, 246, 0.18);
+  border-color: #3b82f6;
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+.memory-external-unavailable-box {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.65rem 0.9rem;
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.22);
+  border-radius: var(--radius-sm);
+  color: #fcd34d;
+  font-size: 0.85rem;
+}
+
+/* --- Suggested Questions Styling --- */
+.memory-suggested-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0.6rem 0;
+  padding: 0.75rem 0.85rem;
+  background: rgba(15, 23, 42, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+}
+
+.memory-suggested-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.memory-suggested-hint {
+  font-size: 0.7rem;
+  color: #64748b;
+  font-style: italic;
+}
+
+.memory-suggested-pills-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.memory-suggested-chip {
+  display: inline-flex;
+  align-items: stretch;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  overflow: hidden;
+  transition: all 0.15s ease;
+}
+
+.memory-suggested-chip:hover {
+  background: rgba(99, 102, 241, 0.08);
+  border-color: rgba(99, 102, 241, 0.28);
+}
+
+.memory-suggested-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: transparent;
+  border: none;
+  padding: 0.3rem 0.55rem;
+  color: #cbd5e1;
+  font-size: 0.74rem;
+  cursor: pointer;
+  text-align: left;
+  line-height: 1.3;
+}
+
+.memory-suggested-btn:hover {
+  color: #ffffff;
+}
+
+.suggested-chip-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.suggested-chip-category {
+  font-weight: 600;
+  color: #818cf8;
+  font-size: 0.72rem;
+  margin-right: 0.15rem;
+}
+
+.suggested-chip-text {
+  color: #e2e8f0;
+}
+
+.memory-suggested-quick-run {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.45rem;
+  background: rgba(99, 102, 241, 0.12);
+  border: none;
+  border-left: 1px solid rgba(255, 255, 255, 0.06);
+  color: #a5b4fc;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.memory-suggested-quick-run:hover {
+  background: #6366f1;
+  color: #ffffff;
+}
+
+/* --- Answer Source Indicator Banner --- */
+.memory-source-indicator-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: 6px;
+  margin-bottom: 0.75rem;
+  transition: all 0.2s ease;
+}
+
+.memory-source-indicator-banner.source-meeting_evidence {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(16, 185, 129, 0.02) 100%);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.memory-source-indicator-banner.source-external_knowledge {
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.08) 0%, rgba(56, 189, 248, 0.02) 100%);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
+.memory-source-indicator-banner.source-combined {
+  background: linear-gradient(135deg, rgba(168, 85, 247, 0.09) 0%, rgba(99, 102, 241, 0.04) 100%);
+  border: 1px solid rgba(168, 85, 247, 0.3);
+}
+
+.memory-source-indicator-banner.source-insufficient_evidence {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.08) 0%, rgba(245, 158, 11, 0.02) 100%);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.source-indicator-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.source-indicator-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.source-indicator-badge .source-label {
+  font-weight: 700;
+  font-size: 0.8rem;
+  letter-spacing: 0.02em;
+}
+
+.source-meeting_evidence .source-label {
+  color: #34d399;
+}
+
+.source-external_knowledge .source-label {
+  color: #38bdf8;
+}
+
+.source-combined .source-label {
+  color: #c084fc;
+}
+
+.source-insufficient_evidence .source-label {
+  color: #fbbf24;
+}
+
+.source-indicator-type-tag {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.1rem 0.45rem;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #94a3b8;
+}
+
+.source-indicator-desc {
+  font-size: 0.78rem;
+  color: #94a3b8;
+  line-height: 1.4;
+}
+

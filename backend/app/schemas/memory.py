@@ -54,6 +54,33 @@ class Citation(BaseModel):
         return self.segment_ids[0] if self.segment_ids else self.chunk_id
 
 
+class ExternalKnowledgeCitation(BaseModel):
+    """Reliable external source citation for background knowledge."""
+    source_title: str = Field(..., description="Name or title of the external reference")
+    source_url: str = Field(..., description="Web URL of the cited source")
+    snippet: Optional[str] = Field(default=None, description="Relevant excerpt or definition from the source")
+    published_date: Optional[str] = Field(default=None, description="Publication or revision date if available")
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ExternalKnowledgeResult(BaseModel):
+    """External background knowledge retrieved to complement meeting context."""
+    subject: str = Field(..., description="Subject or entity requiring external background knowledge")
+    summary: str = Field(..., description="Clear explanation of the subject in accessible language")
+    key_facts: List[str] = Field(default_factory=list, description="Key bullet-point facts explaining the subject")
+    citations: List[ExternalKnowledgeCitation] = Field(default_factory=list, description="Reliable external source citations")
+    provider_used: str = Field(default="wikipedia", description="Provider used for retrieval (e.g. gemini, wikipedia, duckduckgo)")
+    is_available: bool = Field(default=True, description="True if external knowledge was successfully retrieved")
+    unavailability_reason: Optional[str] = Field(default=None, description="Reason if external knowledge is unavailable")
+    disclaimer: str = Field(
+        default="External background knowledge retrieved for context. This information was not discussed during your organization's meetings.",
+        description="Disclaimer clarifying strict separation between meeting facts and external background."
+    )
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class EvidenceChunk(BaseModel):
     """Evidence chunk for RAG context, compatible with test fixtures and runtime representations."""
     meeting_id: str
@@ -176,6 +203,8 @@ class RawAnswerResult(BaseModel):
     structured_questions: List[Dict[str, Any]] = Field(default_factory=list, description="Associated questions")
     detected_conflicts: List[DecisionConflictItem] = Field(default_factory=list, description="Detected conflicts")
     transcript_conflicts: List[TranscriptConflictItem] = Field(default_factory=list, description="Detected transcript contradictions")
+    external_knowledge: Optional[ExternalKnowledgeResult] = Field(default=None, description="External background knowledge if relevant")
+    answer_source_type: Optional[str] = Field(default=None, description="Source classification: 'MEETING_EVIDENCE', 'EXTERNAL_KNOWLEDGE', 'COMBINED', or 'INSUFFICIENT_EVIDENCE'")
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -185,6 +214,7 @@ class RAGQueryRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=1000, description="Natural-language question")
     organization_id: str = Field(..., min_length=1, description="Tenant organization boundary UUID")
     meeting_id: Optional[str] = Field(default=None, description="Optional meeting UUID to scope search to a single meeting")
+    project_id: Optional[str] = Field(default=None, description="Optional project UUID to scope search to a project")
     start_date: Optional[datetime] = Field(default=None, description="Optional earliest meeting date filter")
     end_date: Optional[datetime] = Field(default=None, description="Optional latest meeting date filter")
     max_evidence_chunks: int = Field(default=5, ge=1, le=20, description="Maximum evidence chunks in assembled context")
@@ -206,6 +236,8 @@ class RAGQueryResponse(BaseModel):
     structured_questions: List[Dict[str, Any]] = Field(default_factory=list, description="Relevant structured questions")
     detected_conflicts: List[DecisionConflictItem] = Field(default_factory=list, description="Potentially contradictory active decisions")
     transcript_conflicts: List[TranscriptConflictItem] = Field(default_factory=list, description="Potentially contradictory transcript passages across meetings")
+    external_knowledge: Optional[ExternalKnowledgeResult] = Field(default=None, description="External background knowledge if relevant")
+    answer_source_type: str = Field(default="MEETING_EVIDENCE", description="Source classification: 'MEETING_EVIDENCE', 'EXTERNAL_KNOWLEDGE', 'COMBINED', or 'INSUFFICIENT_EVIDENCE'")
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -222,6 +254,10 @@ class MemoryQueryApiRequest(BaseModel):
     meeting_id: Optional[str] = Field(
         default=None,
         description="Optional meeting UUID to scope the question to a single meeting"
+    )
+    project_id: Optional[str] = Field(
+        default=None,
+        description="Optional project UUID to scope the question to a project"
     )
     start_date: Optional[datetime] = Field(
         default=None,
@@ -277,6 +313,10 @@ class MemorySearchApiRequest(BaseModel):
     meeting_id: Optional[str] = Field(
         default=None,
         description="Optional meeting UUID to scope search"
+    )
+    project_id: Optional[str] = Field(
+        default=None,
+        description="Optional project UUID to scope search to a project"
     )
     start_date: Optional[datetime] = Field(
         default=None,

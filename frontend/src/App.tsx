@@ -29,16 +29,30 @@ import {
   Columns,
   User,
   Building,
-  LogOut
+  LogOut,
+  Calendar,
+  Tag,
+  Users,
+  Folder,
+  Plus,
+  Search,
+  Volume2,
+  FileDown,
 } from 'lucide-react';
 import {
   checkBackendHealth,
   fetchRootInfo,
   fetchMeetings,
   fetchJobStatus,
+  downloadMeetingReportPdf,
   uploadMediaFile,
   ingestYouTube,
   deleteRawMedia,
+  deleteMeeting,
+  retryProcessingJob,
+  getMeetingAudioStreamUrl,
+  fetchProjects,
+  createProject,
   startTranscription,
   fetchTranscripts,
   fetchHardwareDiagnostics,
@@ -59,6 +73,8 @@ import type {
   TranscriptItem,
   HardwareDiagnostics,
   MeetingIntelligence,
+  ProjectItem,
+  PaginatedMeetingsResponse,
 } from './types';
 import { useAuth } from './context/AuthContext';
 import { AuthScreen } from './components/AuthScreen';
@@ -66,6 +82,8 @@ import LandingPage from './components/LandingPage';
 import { OrgSelectionScreen } from './components/OrgSelectionScreen';
 import { MeetingIntelligenceView } from './components/MeetingIntelligenceView';
 import { OrganizationalMemoryView } from './components/OrganizationalMemoryView';
+import { PipelineStepper } from './components/PipelineStepper';
+import { FloatingAskMemora } from './components/FloatingAskMemora';
 import './App.css';
 
 const HARDWARE_SPECS: HardwareSpec[] = [
@@ -177,6 +195,28 @@ const getAuthModeFromHash = (): 'login' | 'register' | null => {
   if (window.location.hash === '#login') return 'login';
   if (window.location.hash === '#register') return 'register';
   return null;
+};
+
+const getNowDateTimeLocal = (): string => {
+  const d = new Date();
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
+const formatFriendlyDate = (val: string): string => {
+  try {
+    const d = new Date(val);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleDateString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return '';
+  }
 };
 
 export const App: React.FC = () => {
@@ -304,11 +344,52 @@ export const App: React.FC = () => {
   const [activeInspectorTab, setActiveInspectorTab] = useState<'health' | 'meetings' | 'asr'>('health');
   const [activeMainTab, setActiveMainTab] = useState<'meetings' | 'memory' | 'system'>('meetings');
 
+  // Floating Ask MEMORA Context & Trigger State
+  const [pendingAskMeetingId, setPendingAskMeetingId] = useState<string | undefined>(undefined);
+  const [pendingAskProjectId, setPendingAskProjectId] = useState<string | undefined>(undefined);
+  const [focusInputTrigger, setFocusInputTrigger] = useState<number>(0);
+
   // Phase 3 Ingestion State
   const [ingestionTab, setIngestionTab] = useState<'file' | 'youtube'>('file');
   const [meetings, setMeetings] = useState<MeetingItem[]>([]);
   const [activeJob, setActiveJob] = useState<ProcessingJob | null>(null);
   const [isDeletingAssetId, setIsDeletingAssetId] = useState<string | null>(null);
+
+  // Phase 1, 3, 4 Roadmap: Ingestion Metadata
+  const [meetingDateInput, setMeetingDateInput] = useState<string>('');
+  const [categoryInput, setCategoryInput] = useState<string>('');
+  const [projectInputId, setProjectInputId] = useState<string>('');
+  const [participantInput, setParticipantInput] = useState<string>('');
+
+  // Projects State
+  const [projects, setProjects] = useState<ProjectItem[]>([]);
+  const [showNewProjectModal, setShowNewProjectModal] = useState<boolean>(false);
+  const [newProjectName, setNewProjectName] = useState<string>('');
+  const [newProjectDesc, setNewProjectDesc] = useState<string>('');
+  const [isCreatingProject, setIsCreatingProject] = useState<boolean>(false);
+
+  // Meeting Library Filter & Pagination State
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [filterProjectId, setFilterProjectId] = useState<string>('');
+  const [filterCategory, setFilterCategory] = useState<string>('');
+  const [filterStatus, setFilterStatus] = useState<string>('');
+  const [filterStartDate, setFilterStartDate] = useState<string>('');
+  const [filterEndDate, setFilterEndDate] = useState<string>('');
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize] = useState<number>(10);
+  const [totalPages, setTotalPages] = useState<number>(1);
+  const [totalMeetingsCount, setTotalMeetingsCount] = useState<number>(0);
+
+  // Full Meeting Deletion State
+  const [meetingToDelete, setMeetingToDelete] = useState<MeetingItem | null>(null);
+  const [isDeletingMeeting, setIsDeletingMeeting] = useState<boolean>(false);
+
+  // Job Retry State
+  const [isRetryingJobId, setIsRetryingJobId] = useState<string | null>(null);
+
+  // Synchronized Audio Playback State
+  const [, setPlayingMeetingId] = useState<string | null>(null);
+  const [audioErrorMap, setAudioErrorMap] = useState<Record<string, string | null>>({});
 
   // File Upload Form State
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -347,9 +428,27 @@ export const App: React.FC = () => {
   const [expandedIntelligence, setExpandedIntelligence] = useState<Record<string, boolean>>({});
   const [isExtractingMap, setIsExtractingMap] = useState<Record<string, boolean>>({});
   const [evidenceNavErrorMap, setEvidenceNavErrorMap] = useState<Record<string, string | null>>({});
+  const [isExportingPdfId, setIsExportingPdfId] = useState<string | null>(null);
 
   const clearTenantDashboardState = useCallback((): void => {
     setMeetings([]);
+    setProjects([]);
+    setShowNewProjectModal(false);
+    setMeetingToDelete(null);
+    setIsDeletingMeeting(false);
+    setIsRetryingJobId(null);
+    setIsExportingPdfId(null);
+    setPlayingMeetingId(null);
+    setAudioErrorMap({});
+    setSearchQuery('');
+    setFilterProjectId('');
+    setFilterCategory('');
+    setFilterStatus('');
+    setFilterStartDate('');
+    setFilterEndDate('');
+    setCurrentPage(1);
+    setTotalPages(1);
+    setTotalMeetingsCount(0);
     setMeetingTranscripts({});
     setMeetingIntelligence({});
     setActiveJob(null);
@@ -376,25 +475,110 @@ export const App: React.FC = () => {
     }
   }, [user?.is_super_admin]);
 
-  const loadMeetings = useCallback(async () => {
+  const loadProjects = useCallback(async () => {
     if (!currentOrg) return;
     const capturedEpoch = requestEpochRef.current;
     const capturedOrgId = currentOrg.organization_id;
-
     const controller = createRegisteredController();
     try {
-      const data = await fetchMeetings(controller.signal);
+      const data = await fetchProjects(controller.signal);
       if (isContextCurrent(capturedEpoch, capturedOrgId)) {
-        setMeetings(data);
+        setProjects(data);
       }
     } catch (err: unknown) {
       if (!isAbortError(err)) {
-        // Backend may be offline or no meetings yet
+        console.error('Failed to load projects:', err);
       }
     } finally {
       unregisterController(controller);
     }
   }, [currentOrg, createRegisteredController, isContextCurrent, unregisterController]);
+
+  const handleCreateProject = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newProjectName.trim()) return;
+    setIsCreatingProject(true);
+    const controller = createRegisteredController();
+    try {
+      const created = await createProject(
+        {
+          name: newProjectName.trim(),
+          description: newProjectDesc.trim() || undefined,
+        },
+        controller.signal
+      );
+      setProjects((prev) => [created, ...prev]);
+      setProjectInputId(created.id);
+      setNewProjectName('');
+      setNewProjectDesc('');
+      setShowNewProjectModal(false);
+    } catch (err: unknown) {
+      if (!isAbortError(err)) {
+        alert(err instanceof Error ? err.message : 'Failed to create project');
+      }
+    } finally {
+      unregisterController(controller);
+      setIsCreatingProject(false);
+    }
+  };
+
+  const loadMeetings = useCallback(
+    async (overridePage?: number) => {
+      if (!currentOrg) return;
+      const capturedEpoch = requestEpochRef.current;
+      const capturedOrgId = currentOrg.organization_id;
+
+      const targetPage = overridePage !== undefined ? overridePage : currentPage;
+      const controller = createRegisteredController();
+      try {
+        const filterParams = {
+          search: searchQuery.trim() || undefined,
+          project_id: filterProjectId || undefined,
+          category: filterCategory || undefined,
+          status: filterStatus || undefined,
+          start_date: filterStartDate ? new Date(filterStartDate).toISOString() : undefined,
+          end_date: filterEndDate ? new Date(filterEndDate).toISOString() : undefined,
+          page: targetPage,
+          limit: pageSize,
+          paginate: true,
+        };
+
+        const res = await fetchMeetings(filterParams, controller.signal);
+        if (isContextCurrent(capturedEpoch, capturedOrgId)) {
+          if (res && 'items' in res) {
+            const paginated = res as PaginatedMeetingsResponse;
+            setMeetings(paginated.items);
+            setTotalMeetingsCount(paginated.total);
+            setTotalPages(paginated.pages);
+          } else if (Array.isArray(res)) {
+            setMeetings(res);
+            setTotalMeetingsCount(res.length);
+            setTotalPages(Math.max(1, Math.ceil(res.length / pageSize)));
+          }
+        }
+      } catch (err: unknown) {
+        if (!isAbortError(err)) {
+          // Backend may be offline or no meetings yet
+        }
+      } finally {
+        unregisterController(controller);
+      }
+    },
+    [
+      currentOrg,
+      createRegisteredController,
+      isContextCurrent,
+      unregisterController,
+      currentPage,
+      pageSize,
+      searchQuery,
+      filterProjectId,
+      filterCategory,
+      filterStatus,
+      filterStartDate,
+      filterEndDate,
+    ]
+  );
 
   const handleSwitchOrganization = async (targetOrgId: string) => {
     if (!targetOrgId || targetOrgId === currentOrg?.organization_id || isSwitchingOrg) {
@@ -430,7 +614,15 @@ export const App: React.FC = () => {
       try {
         const freshMeetings = await fetchMeetings(controller.signal);
         if (isContextCurrent(newEpoch, targetOrgId)) {
-          setMeetings(freshMeetings);
+          if (freshMeetings && 'items' in freshMeetings) {
+            setMeetings((freshMeetings as PaginatedMeetingsResponse).items);
+          } else if (Array.isArray(freshMeetings)) {
+            setMeetings(freshMeetings);
+          }
+        }
+        const freshProjects = await fetchProjects(controller.signal);
+        if (isContextCurrent(newEpoch, targetOrgId)) {
+          setProjects(freshProjects);
         }
       } finally {
         unregisterController(controller);
@@ -476,6 +668,18 @@ export const App: React.FC = () => {
       const data = await fetchTranscripts(meetingId, controller.signal);
       if (isContextCurrent(capturedEpoch, capturedOrgId)) {
         setMeetingTranscripts((prev) => ({ ...prev, [meetingId]: data }));
+        setMeetings((prev) =>
+          prev.map((m) =>
+            m.id === meetingId
+              ? {
+                  ...m,
+                  transcript_types: Array.from(
+                    new Set([...(m.transcript_types || []), ...data.map((t) => t.transcript_type)])
+                  ),
+                }
+              : m
+          )
+        );
         return data;
       }
       return [];
@@ -578,6 +782,18 @@ export const App: React.FC = () => {
         await loadTranscriptsForMeeting(meetingId);
         if (isContextCurrent(capturedEpoch, capturedOrgId)) {
           setSelectedVersionMap((prev) => ({ ...prev, [meetingId]: derived.id }));
+          setMeetings((prev) =>
+            prev.map((m) =>
+              m.id === meetingId
+                ? {
+                    ...m,
+                    transcript_types: Array.from(
+                      new Set([...(m.transcript_types || []), derived.transcript_type || 'CLEANED'])
+                    ),
+                  }
+                : m
+            )
+          );
         }
       }
     } catch (err: unknown) {
@@ -607,6 +823,18 @@ export const App: React.FC = () => {
         await loadTranscriptsForMeeting(meetingId);
         if (isContextCurrent(capturedEpoch, capturedOrgId)) {
           setSelectedVersionMap((prev) => ({ ...prev, [meetingId]: derived.id }));
+          setMeetings((prev) =>
+            prev.map((m) =>
+              m.id === meetingId
+                ? {
+                    ...m,
+                    transcript_types: Array.from(
+                      new Set([...(m.transcript_types || []), derived.transcript_type || 'REDACTED'])
+                    ),
+                  }
+                : m
+            )
+          );
         }
       }
     } catch (err: unknown) {
@@ -636,6 +864,18 @@ export const App: React.FC = () => {
         await loadTranscriptsForMeeting(meetingId);
         if (isContextCurrent(capturedEpoch, capturedOrgId)) {
           setSelectedVersionMap((prev) => ({ ...prev, [meetingId]: derived.id }));
+          setMeetings((prev) =>
+            prev.map((m) =>
+              m.id === meetingId
+                ? {
+                    ...m,
+                    transcript_types: Array.from(
+                      new Set([...(m.transcript_types || []), derived.transcript_type || 'CLEANED_REDACTED'])
+                    ),
+                  }
+                : m
+            )
+          );
         }
       }
     } catch (err: unknown) {
@@ -836,6 +1076,32 @@ export const App: React.FC = () => {
     handleNavigateToEvidence(meetingId, segmentId, timestampSeconds);
   }, [handleNavigateToEvidence]);
 
+  const handleFloatingAskMemoraClick = useCallback(() => {
+    // Preserve focused meeting if an accordion is currently expanded
+    const expandedMeetingId = Object.keys(expandedIntelligence).find((id) => !!expandedIntelligence[id]) ||
+                              Object.keys(expandedTranscripts).find((id) => !!expandedTranscripts[id]);
+    if (expandedMeetingId) {
+      setPendingAskMeetingId(expandedMeetingId);
+    }
+    if (filterProjectId) {
+      setPendingAskProjectId(filterProjectId);
+    }
+
+    setActiveMainTab('memory');
+    setFocusInputTrigger((prev) => prev + 1);
+  }, [expandedIntelligence, expandedTranscripts, filterProjectId]);
+
+  const handleExportMeetingPdf = useCallback(async (meetingId: string, meetingTitle: string) => {
+    setIsExportingPdfId(meetingId);
+    try {
+      await downloadMeetingReportPdf(meetingId, meetingTitle);
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Failed to export meeting report PDF');
+    } finally {
+      setIsExportingPdfId(null);
+    }
+  }, []);
+
   const formatTime = (seconds: number): string => {
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
@@ -865,6 +1131,7 @@ export const App: React.FC = () => {
     await fetchRootInfo();
     if (isAuthenticated && currentOrg) {
       await loadMeetings();
+      await loadProjects();
     }
     if (isAuthenticated && isDiagnosticsEnabled) {
       await loadHardwareDiagnostics();
@@ -872,7 +1139,7 @@ export const App: React.FC = () => {
       setHardwareDiagnostics(null);
     }
     setIsRefreshing(false);
-  }, [isAuthenticated, isDiagnosticsEnabled, currentOrg, loadMeetings, loadHardwareDiagnostics]);
+  }, [isAuthenticated, isDiagnosticsEnabled, currentOrg, loadMeetings, loadProjects, loadHardwareDiagnostics]);
 
   useEffect(() => {
     runHealthCheck();
@@ -887,6 +1154,7 @@ export const App: React.FC = () => {
       if (!isMounted) return;
       if (isAuthenticated && currentOrg) {
         await loadMeetings();
+        await loadProjects();
       }
       if (isAuthenticated && isDiagnosticsEnabled) {
         await loadHardwareDiagnostics();
@@ -899,7 +1167,7 @@ export const App: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [isAuthenticated, isDiagnosticsEnabled, currentOrg, loadMeetings, loadHardwareDiagnostics]);
+  }, [isAuthenticated, isDiagnosticsEnabled, currentOrg, loadMeetings, loadProjects, loadHardwareDiagnostics]);
 
   // Poll active processing job
   const activeJobId = activeJob?.id ?? null;
@@ -1019,6 +1287,19 @@ export const App: React.FC = () => {
     const uploadController = new AbortController();
     activeUploadAbortControllerRef.current = uploadController;
 
+    const parsedParticipants = participantInput
+      .split(',')
+      .map((p) => p.trim())
+      .filter((p) => p.length > 0)
+      .map((name) => ({ display_name: name }));
+
+    const extraOpts = {
+      meetingDate: meetingDateInput ? new Date(meetingDateInput).toISOString() : undefined,
+      category: categoryInput || undefined,
+      projectId: projectInputId || undefined,
+      participants: parsedParticipants.length > 0 ? parsedParticipants : undefined,
+    };
+
     try {
       const response = await uploadMediaFile(
         selectedFile,
@@ -1029,7 +1310,8 @@ export const App: React.FC = () => {
             setUploadProgress(progress);
           }
         },
-        uploadController.signal
+        uploadController.signal,
+        extraOpts
       );
 
       if (!isContextCurrent(capturedEpoch, capturedOrgId)) {
@@ -1041,6 +1323,10 @@ export const App: React.FC = () => {
       setSelectedFile(null);
       setFileTitle('');
       setFileDesc('');
+      setMeetingDateInput('');
+      setCategoryInput('');
+      setProjectInputId('');
+      setParticipantInput('');
       if (fileInputRef.current) fileInputRef.current.value = '';
 
       // Track active background job
@@ -1092,6 +1378,19 @@ export const App: React.FC = () => {
     setYtError(null);
     setIsSubmittingYt(true);
 
+    const parsedParticipants = participantInput
+      .split(',')
+      .map((p) => p.trim())
+      .filter((p) => p.length > 0)
+      .map((name) => ({ display_name: name }));
+
+    const extraOpts = {
+      meetingDate: meetingDateInput ? new Date(meetingDateInput).toISOString() : undefined,
+      category: categoryInput || undefined,
+      projectId: projectInputId || undefined,
+      participants: parsedParticipants.length > 0 ? parsedParticipants : undefined,
+    };
+
     const controller = createRegisteredController();
     try {
       const response = await ingestYouTube(
@@ -1099,7 +1398,8 @@ export const App: React.FC = () => {
         ytTitle || undefined,
         ytDesc || undefined,
         confirmedAuth,
-        controller.signal
+        controller.signal,
+        extraOpts
       );
 
       if (!isContextCurrent(capturedEpoch, capturedOrgId)) {
@@ -1110,6 +1410,10 @@ export const App: React.FC = () => {
       setYoutubeUrl('');
       setYtTitle('');
       setYtDesc('');
+      setMeetingDateInput('');
+      setCategoryInput('');
+      setProjectInputId('');
+      setParticipantInput('');
       setConfirmedAuth(false);
 
       // Track active background job
@@ -1171,6 +1475,83 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleConfirmDeleteMeeting = async () => {
+    if (!meetingToDelete || !currentOrg) return;
+    const capturedEpoch = requestEpochRef.current;
+    const capturedOrgId = currentOrg.organization_id;
+
+    setIsDeletingMeeting(true);
+    const controller = createRegisteredController();
+    try {
+      await deleteMeeting(meetingToDelete.id, controller.signal);
+      if (isContextCurrent(capturedEpoch, capturedOrgId)) {
+        setMeetingToDelete(null);
+        await loadMeetings();
+      }
+    } catch (err: unknown) {
+      if (!isAbortError(err)) {
+        if (isContextCurrent(capturedEpoch, capturedOrgId)) {
+          alert(err instanceof Error ? err.message : 'Failed to delete meeting');
+        }
+      }
+    } finally {
+      unregisterController(controller);
+      if (isContextCurrent(capturedEpoch, capturedOrgId)) {
+        setIsDeletingMeeting(false);
+      }
+    }
+  };
+
+  const handleRetryJob = async (jobId: string) => {
+    if (!currentOrg) return;
+    const capturedEpoch = requestEpochRef.current;
+    const capturedOrgId = currentOrg.organization_id;
+
+    setIsRetryingJobId(jobId);
+    const controller = createRegisteredController();
+    try {
+      const retried = await retryProcessingJob(jobId, controller.signal);
+      if (isContextCurrent(capturedEpoch, capturedOrgId)) {
+        setActiveJob(retried);
+        await loadMeetings();
+      }
+    } catch (err: unknown) {
+      if (!isAbortError(err)) {
+        if (isContextCurrent(capturedEpoch, capturedOrgId)) {
+          alert(err instanceof Error ? err.message : 'Failed to retry job');
+        }
+      }
+    } finally {
+      unregisterController(controller);
+      if (isContextCurrent(capturedEpoch, capturedOrgId)) {
+        setIsRetryingJobId(null);
+      }
+    }
+  };
+
+  const handleSeekAudio = (meetingId: string, timestampSeconds: number) => {
+    setPlayingMeetingId(meetingId);
+    setTimeout(() => {
+      const audioElem = document.getElementById(`audio-player-${meetingId}`) as HTMLAudioElement | null;
+      if (audioElem) {
+        audioElem.currentTime = timestampSeconds;
+        audioElem.play().catch((err) => {
+          console.warn('Audio playback not allowed or failed:', err);
+        });
+      }
+    }, 60);
+  };
+
+  const handleClearFilters = () => {
+    setSearchQuery('');
+    setFilterProjectId('');
+    setFilterCategory('');
+    setFilterStatus('');
+    setFilterStartDate('');
+    setFilterEndDate('');
+    setCurrentPage(1);
+  };
+
   const isConnected = healthResult?.data?.status === 'ok';
 
   // 1. Loading state during session restoration
@@ -1196,6 +1577,8 @@ export const App: React.FC = () => {
     return <OrgSelectionScreen />;
   }
 
+  const isWorkspaceAdmin = currentOrg?.role === 'ORG_ADMIN' || currentOrg?.role === 'INDIVIDUAL';
+
   return (
     <div className="app-container">
       {/* Navigation Header */}
@@ -1206,7 +1589,7 @@ export const App: React.FC = () => {
               <Sparkles size={22} />
             </div>
             <div>
-              <h1 className="brand-title">Multilingual Meeting Intelligence</h1>
+              <h1 className="brand-title">MEMORA</h1>
               <div className="brand-subtitle">Organizational Memory & Dual-Source RAG Platform</div>
             </div>
           </div>
@@ -1256,7 +1639,7 @@ export const App: React.FC = () => {
                     </option>
                   ))}
                 </select>
-                <span className={`header-role-badge ${currentOrg.role === 'ORG_ADMIN' ? 'admin' : 'member'}`}>
+                <span className={`header-role-badge ${isWorkspaceAdmin ? 'admin' : 'member'}`}>
                   <Shield size={10} />
                   {currentOrg.role}
                 </span>
@@ -1266,7 +1649,7 @@ export const App: React.FC = () => {
               <div className="header-single-org">
                 <Building size={14} style={{ color: '#818cf8', flexShrink: 0 }} />
                 <span>{currentOrg.organization_name}</span>
-                <span className={`header-role-badge ${currentOrg.role === 'ORG_ADMIN' ? 'admin' : 'member'}`}>
+                <span className={`header-role-badge ${isWorkspaceAdmin ? 'admin' : 'member'}`}>
                   <Shield size={10} />
                   {currentOrg.role}
                 </span>
@@ -1335,10 +1718,14 @@ export const App: React.FC = () => {
         {activeMainTab === 'memory' && (
           <OrganizationalMemoryView
             meetings={meetings}
+            projects={projects}
             onNavigateToEvidence={handleMemoryNavigateToEvidence}
             currentOrgName={currentOrg?.organization_name}
             currentOrgRole={currentOrg?.role}
             currentOrgId={currentOrg?.organization_id}
+            initialMeetingId={pendingAskMeetingId}
+            initialProjectId={pendingAskProjectId}
+            focusInputTrigger={focusInputTrigger}
           />
         )}
 
@@ -1429,6 +1816,120 @@ export const App: React.FC = () => {
                         onChange={(e) => setFileDesc(e.target.value)}
                       />
                     </div>
+                    <div className="form-group">
+                      <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span>
+                          <Calendar size={13} style={{ display: 'inline', marginRight: '4px', verticalAlign: '-1px' }} />
+                          Meeting Date &amp; Time (Optional)
+                        </span>
+                        <div style={{ display: 'flex', gap: '6px' }}>
+                          <button
+                            type="button"
+                            className="date-preset-pill"
+                            onClick={() => setMeetingDateInput(getNowDateTimeLocal())}
+                            title="Set to current date and time"
+                          >
+                            <Clock size={11} /> Now
+                          </button>
+                          {meetingDateInput && (
+                            <button
+                              type="button"
+                              className="date-preset-pill clear"
+                              onClick={() => setMeetingDateInput('')}
+                              title="Clear meeting date (defaults to current ingestion time)"
+                            >
+                              Clear
+                            </button>
+                          )}
+                        </div>
+                      </label>
+                      <input
+                        type="datetime-local"
+                        className="form-input datetime-picker-input"
+                        value={meetingDateInput}
+                        onChange={(e) => setMeetingDateInput(e.target.value)}
+                        title="When the meeting occurred (defaults to current time)"
+                      />
+                      <div className="form-field-hint">
+                        {meetingDateInput ? (
+                          <span style={{ color: '#34d399', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                            <CheckCircle2 size={11} /> {formatFriendlyDate(meetingDateInput)}
+                          </span>
+                        ) : (
+                          'Defaults to current time if left empty'
+                        )}
+                      </div>
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">
+                        <Tag size={13} style={{ display: 'inline', marginRight: '4px', verticalAlign: '-1px' }} />
+                        Meeting Category
+                      </label>
+                      <select
+                        className="form-input"
+                        value={categoryInput}
+                        onChange={(e) => setCategoryInput(e.target.value)}
+                      >
+                        <option value="">Select Category (Default: General)</option>
+                        <option value="Sprint Planning">Sprint Planning</option>
+                        <option value="Architecture Review">Architecture Review</option>
+                        <option value="One-on-One">One-on-One</option>
+                        <option value="Retrospective">Retrospective</option>
+                        <option value="All Hands">All Hands</option>
+                        <option value="Client Discussion">Client Discussion</option>
+                        <option value="Other">Other</option>
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span>
+                          <Folder size={13} style={{ display: 'inline', marginRight: '4px', verticalAlign: '-1px' }} />
+                          Project Grouping
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setShowNewProjectModal(true)}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: '#818cf8',
+                            fontSize: '0.75rem',
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '2px',
+                            padding: 0,
+                          }}
+                        >
+                          <Plus size={12} /> New Project
+                        </button>
+                      </label>
+                      <select
+                        className="form-input"
+                        value={projectInputId}
+                        onChange={(e) => setProjectInputId(e.target.value)}
+                      >
+                        <option value="">No Project (Unassigned)</option>
+                        {projects.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">
+                        <Users size={13} style={{ display: 'inline', marginRight: '4px', verticalAlign: '-1px' }} />
+                        Participants (Comma-separated)
+                      </label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="e.g. Alice Sharma, Bob Patel"
+                        value={participantInput}
+                        onChange={(e) => setParticipantInput(e.target.value)}
+                      />
+                    </div>
                   </div>
 
                   {isUploading && (
@@ -1499,6 +2000,120 @@ export const App: React.FC = () => {
                         onChange={(e) => setYtDesc(e.target.value)}
                       />
                     </div>
+                    <div className="form-group">
+                      <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span>
+                          <Calendar size={13} style={{ display: 'inline', marginRight: '4px', verticalAlign: '-1px' }} />
+                          Meeting Date &amp; Time (Optional)
+                        </span>
+                        <div style={{ display: 'flex', gap: '6px' }}>
+                          <button
+                            type="button"
+                            className="date-preset-pill"
+                            onClick={() => setMeetingDateInput(getNowDateTimeLocal())}
+                            title="Set to current date and time"
+                          >
+                            <Clock size={11} /> Now
+                          </button>
+                          {meetingDateInput && (
+                            <button
+                              type="button"
+                              className="date-preset-pill clear"
+                              onClick={() => setMeetingDateInput('')}
+                              title="Clear meeting date (defaults to current ingestion time)"
+                            >
+                              Clear
+                            </button>
+                          )}
+                        </div>
+                      </label>
+                      <input
+                        type="datetime-local"
+                        className="form-input datetime-picker-input"
+                        value={meetingDateInput}
+                        onChange={(e) => setMeetingDateInput(e.target.value)}
+                        title="When the meeting occurred (defaults to current time)"
+                      />
+                      <div className="form-field-hint">
+                        {meetingDateInput ? (
+                          <span style={{ color: '#34d399', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                            <CheckCircle2 size={11} /> {formatFriendlyDate(meetingDateInput)}
+                          </span>
+                        ) : (
+                          'Defaults to current time if left empty'
+                        )}
+                      </div>
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">
+                        <Tag size={13} style={{ display: 'inline', marginRight: '4px', verticalAlign: '-1px' }} />
+                        Meeting Category
+                      </label>
+                      <select
+                        className="form-input"
+                        value={categoryInput}
+                        onChange={(e) => setCategoryInput(e.target.value)}
+                      >
+                        <option value="">Select Category (Default: General)</option>
+                        <option value="Sprint Planning">Sprint Planning</option>
+                        <option value="Architecture Review">Architecture Review</option>
+                        <option value="One-on-One">One-on-One</option>
+                        <option value="Retrospective">Retrospective</option>
+                        <option value="All Hands">All Hands</option>
+                        <option value="Client Discussion">Client Discussion</option>
+                        <option value="Other">Other</option>
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span>
+                          <Folder size={13} style={{ display: 'inline', marginRight: '4px', verticalAlign: '-1px' }} />
+                          Project Grouping
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setShowNewProjectModal(true)}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: '#818cf8',
+                            fontSize: '0.75rem',
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '2px',
+                            padding: 0,
+                          }}
+                        >
+                          <Plus size={12} /> New Project
+                        </button>
+                      </label>
+                      <select
+                        className="form-input"
+                        value={projectInputId}
+                        onChange={(e) => setProjectInputId(e.target.value)}
+                      >
+                        <option value="">No Project (Unassigned)</option>
+                        {projects.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">
+                        <Users size={13} style={{ display: 'inline', marginRight: '4px', verticalAlign: '-1px' }} />
+                        Participants (Comma-separated)
+                      </label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="e.g. Alice Sharma, Bob Patel"
+                        value={participantInput}
+                        onChange={(e) => setParticipantInput(e.target.value)}
+                      />
+                    </div>
                   </div>
 
                   <label className="checkbox-container">
@@ -1561,7 +2176,7 @@ export const App: React.FC = () => {
                   <div style={{ fontSize: '0.8rem', color: '#94a3b8' }}>
                     {activeJob.status === 'IN_PROGRESS' &&
                       (activeJob.job_type === 'TRANSCRIPTION'
-                        ? 'Transcribing audio with Faster-Whisper on RTX 5060 GPU...'
+                        ? 'Transcribing audio with Faster Whisper on GPU...'
                         : activeJob.job_type === 'EXTRACTION'
                         ? 'Extracting structured meeting intelligence (summary, decisions, actions, risks)...'
                         : 'Processing media: Validating streams and normalizing audio to 16kHz mono WAV...')}
@@ -1583,12 +2198,93 @@ export const App: React.FC = () => {
         <section className="history-section">
           <div className="section-title">
             <Layers size={22} color="#10b981" />
-            Ingested Meetings & Media History ({meetings.length})
+            Ingested Meetings & Media History ({totalMeetingsCount || meetings.length})
+          </div>
+
+          {/* Library Filter & Search Toolbar */}
+          <div className="library-filter-toolbar">
+            <div className="filter-toolbar-row">
+              <div style={{ position: 'relative', flex: 1, minWidth: '220px' }}>
+                <Search size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+                <input
+                  type="text"
+                  className="library-search-input"
+                  style={{ paddingLeft: '32px' }}
+                  placeholder="Search meetings by title, description..."
+                  value={searchQuery}
+                  onChange={(e) => {
+                    setSearchQuery(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                />
+              </div>
+
+              <select
+                className="library-filter-select"
+                value={filterProjectId}
+                onChange={(e) => {
+                  setFilterProjectId(e.target.value);
+                  setCurrentPage(1);
+                }}
+                title="Filter by Project"
+              >
+                <option value="">All Projects</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+
+              <select
+                className="library-filter-select"
+                value={filterCategory}
+                onChange={(e) => {
+                  setFilterCategory(e.target.value);
+                  setCurrentPage(1);
+                }}
+                title="Filter by Category"
+              >
+                <option value="">All Categories</option>
+                <option value="Sprint Planning">Sprint Planning</option>
+                <option value="Architecture Review">Architecture Review</option>
+                <option value="One-on-One">One-on-One</option>
+                <option value="Retrospective">Retrospective</option>
+                <option value="All Hands">All Hands</option>
+                <option value="Client Discussion">Client Discussion</option>
+                <option value="Other">Other</option>
+              </select>
+
+              <select
+                className="library-filter-select"
+                value={filterStatus}
+                onChange={(e) => {
+                  setFilterStatus(e.target.value);
+                  setCurrentPage(1);
+                }}
+                title="Filter by Ingestion Status"
+              >
+                <option value="">All Statuses</option>
+                <option value="INGESTED">Ingested</option>
+                <option value="PROCESSING">Processing</option>
+                <option value="READY">Ready</option>
+                <option value="FAILED">Failed</option>
+              </select>
+
+              {(searchQuery || filterProjectId || filterCategory || filterStatus || filterStartDate || filterEndDate) && (
+                <button
+                  type="button"
+                  className="btn-copy"
+                  onClick={handleClearFilters}
+                  style={{ padding: '0.4rem 0.75rem', fontSize: '0.75rem' }}
+                >
+                  Clear Filters
+                </button>
+              )}
+            </div>
           </div>
 
           {meetings.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '2rem', color: '#64748b', background: '#161b2a', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.08)' }}>
-              No meetings ingested yet. Upload an audio/video file or YouTube link above to start.
+              No meetings found. Upload an audio/video file, submit a YouTube link, or adjust your search filters.
             </div>
           ) : (
             <div className="history-grid">
@@ -1601,15 +2297,107 @@ export const App: React.FC = () => {
                         {meeting.input_source_type === 'YOUTUBE' ? <PlayCircle size={12} /> : meeting.input_source_type === 'VIDEO' ? <FileVideo size={12} /> : <FileAudio size={12} />}
                         {meeting.input_source_type}
                       </span>
+                      {meeting.category && (
+                        <span className="meeting-category-badge" title="Meeting Category">
+                          <Tag size={11} /> {meeting.category}
+                        </span>
+                      )}
+                      {(meeting.project_name || projects.find((p) => p.id === meeting.project_id)?.name) && (
+                        <span className="meeting-project-badge" title="Project Grouping">
+                          <Folder size={11} /> {meeting.project_name || projects.find((p) => p.id === meeting.project_id)?.name}
+                        </span>
+                      )}
                     </div>
-                    <span className="meeting-date">
-                      {new Date(meeting.created_at).toLocaleDateString()} {new Date(meeting.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                      <span className="meeting-date" title={meeting.actual_start_time ? 'Scheduled/Actual Meeting Date' : 'Ingestion Timestamp'}>
+                        <Calendar size={12} style={{ display: 'inline', marginRight: '4px', verticalAlign: '-1px' }} />
+                        {new Date(meeting.actual_start_time || meeting.scheduled_start_time || meeting.created_at).toLocaleDateString()} {new Date(meeting.actual_start_time || meeting.scheduled_start_time || meeting.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                      <button
+                        type="button"
+                        className="btn-delete-meeting"
+                        onClick={() => setMeetingToDelete(meeting)}
+                        title="Securely delete meeting, media files, transcripts, and memory indexes"
+                      >
+                        <Trash2 size={12} /> Delete
+                      </button>
+                    </div>
                   </div>
 
                   {meeting.description && (
                     <div style={{ fontSize: '0.85rem', color: '#94a3b8' }}>{meeting.description}</div>
                   )}
+
+                  {/* Participants Chips */}
+                  {meeting.participants && meeting.participants.length > 0 && (
+                    <div className="meeting-participants-chips">
+                      <span style={{ fontSize: '0.75rem', color: '#64748b', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                        <Users size={12} /> Participants:
+                      </span>
+                      {meeting.participants.map((p) => (
+                        <span key={p.id} className="participant-chip">
+                          {p.display_name} {p.role && p.role !== 'ATTENDEE' ? `(${p.role})` : ''}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* 5-Stage Processing Pipeline Stepper */}
+                  <PipelineStepper
+                    meeting={meeting}
+                    transcripts={meetingTranscripts[meeting.id] || []}
+                    intelligence={meetingIntelligence[meeting.id] || null}
+                    onRetry={handleRetryJob}
+                    isRetrying={isRetryingJobId === meeting.id}
+                    isDeriving={
+                      isProcessingActionMap[meeting.id] === 'both' ||
+                      isProcessingActionMap[meeting.id] === 'clean' ||
+                      isProcessingActionMap[meeting.id] === 'redact'
+                    }
+                  />
+
+                  {/* Synchronized Audio Player / Privacy Retention Notice */}
+                  {(() => {
+                    const rawOrNormAsset = meeting.media_assets?.find(
+                      (a) => a.media_type === 'NORMALIZED_AUDIO' || a.media_type === 'AUDIO'
+                    );
+                    const isRawDeleted = rawOrNormAsset?.is_raw_deleted;
+
+                    if (isRawDeleted) {
+                      return (
+                        <div className="privacy-audio-notice">
+                          <Shield size={13} style={{ flexShrink: 0 }} />
+                          <span>Raw audio file securely deleted per organization data retention policy.</span>
+                        </div>
+                      );
+                    }
+
+                    if (rawOrNormAsset && !isRawDeleted) {
+                      return (
+                        <div style={{ margin: '0.6rem 0', display: 'flex', alignItems: 'center', gap: '0.75rem', background: 'rgba(255,255,255,0.03)', padding: '0.5rem 0.75rem', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                          <Volume2 size={16} color="#818cf8" />
+                          <span style={{ fontSize: '0.75rem', color: '#cbd5e1' }}>Synchronized Audio:</span>
+                          <audio
+                            id={`audio-player-${meeting.id}`}
+                            controls
+                            preload="none"
+                            style={{ height: '30px', flex: 1, maxWidth: '420px' }}
+                            src={getMeetingAudioStreamUrl(meeting.id)}
+                            onError={() => {
+                              setAudioErrorMap((prev) => ({
+                                ...prev,
+                                [meeting.id]: 'Audio stream unavailable or expired per retention policy.',
+                              }));
+                            }}
+                          />
+                          {audioErrorMap[meeting.id] && (
+                            <span style={{ fontSize: '0.7rem', color: '#f59e0b' }}>{audioErrorMap[meeting.id]}</span>
+                          )}
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
 
                   {/* Associated Media Assets */}
                   <div className="assets-box">
@@ -1634,7 +2422,7 @@ export const App: React.FC = () => {
                             {asset.is_raw_deleted ? (
                               <span className="deleted-tag">Raw Deleted</span>
                             ) : (
-                              currentOrg?.role === 'ORG_ADMIN' && asset.media_type !== 'NORMALIZED_AUDIO' && (
+                              isWorkspaceAdmin && asset.media_type !== 'NORMALIZED_AUDIO' && (
                                 <button
                                   className="btn-delete-raw"
                                   onClick={() => handleDeleteRawMedia(asset.id)}
@@ -1721,6 +2509,16 @@ export const App: React.FC = () => {
                         <Sparkles size={14} color="#818cf8" />
                         {expandedIntelligence[meeting.id] ? 'Hide Intelligence' : 'Meeting Intelligence'}
                       </button>
+
+                      <button
+                        className="btn-copy btn-export-pdf"
+                        onClick={() => handleExportMeetingPdf(meeting.id, meeting.title)}
+                        disabled={isExportingPdfId === meeting.id}
+                        title="Download executive meeting report as PDF (includes summary, topics, decisions, actions, and evidence)"
+                      >
+                        <FileDown size={14} color="#38bdf8" />
+                        {isExportingPdfId === meeting.id ? 'Generating PDF...' : 'Export PDF'}
+                      </button>
                     </div>
 
                     {/* Transcripts List & Phase 5 Multi-Version Intelligence Panel */}
@@ -1784,7 +2582,7 @@ export const App: React.FC = () => {
 
                                   {/* Intelligence & Privacy Derivation Actions */}
                                   <div className="derivation-actions-row">
-                                    {currentOrg?.role === 'ORG_ADMIN' && (
+                                    {isWorkspaceAdmin && (
                                       <button
                                         className="btn-intel-action clean"
                                         onClick={() => handleCleanTranscript(meeting.id)}
@@ -1994,9 +2792,15 @@ export const App: React.FC = () => {
                                         {origTranscript.segments.map((seg) => (
                                           <div key={seg.id} id={`orig-segment-${seg.id}`} className="segment-item original-verbatim">
                                             <div className="segment-meta">
-                                              <span className="timestamp-pill">
+                                              <button
+                                                type="button"
+                                                className="timestamp-pill"
+                                                onClick={() => handleSeekAudio(meeting.id, seg.start_time)}
+                                                title="Click to play audio from this timestamp"
+                                                style={{ cursor: 'pointer', background: 'none', border: 'none', font: 'inherit', padding: 0 }}
+                                              >
                                                 [{formatTime(seg.start_time)} - {formatTime(seg.end_time)}]
-                                              </span>
+                                              </button>
                                               <span className={`lang-pill ${seg.language_code.toLowerCase()}`}>
                                                 {seg.language_code}
                                               </span>
@@ -2028,9 +2832,15 @@ export const App: React.FC = () => {
                                             className={`segment-item ${seg.is_redacted ? 'redacted-item' : ''}`}
                                           >
                                             <div className="segment-meta">
-                                              <span className="timestamp-pill">
+                                              <button
+                                                type="button"
+                                                className="timestamp-pill"
+                                                onClick={() => handleSeekAudio(meeting.id, seg.start_time)}
+                                                title="Click to play audio from this timestamp"
+                                                style={{ cursor: 'pointer', background: 'none', border: 'none', font: 'inherit', padding: 0 }}
+                                              >
                                                 [{formatTime(seg.start_time)} - {formatTime(seg.end_time)}]
-                                              </span>
+                                              </button>
                                               <span className={`lang-pill ${seg.language_code.toLowerCase()}`}>
                                                 {seg.language_code}
                                               </span>
@@ -2062,9 +2872,15 @@ export const App: React.FC = () => {
                                         className={`segment-item ${seg.is_redacted ? 'redacted-item' : ''}`}
                                       >
                                         <div className="segment-meta">
-                                          <span className="timestamp-pill">
+                                          <button
+                                            type="button"
+                                            className="timestamp-pill"
+                                            onClick={() => handleSeekAudio(meeting.id, seg.start_time)}
+                                            title="Click to play audio from this timestamp"
+                                            style={{ cursor: 'pointer', background: 'none', border: 'none', font: 'inherit', padding: 0 }}
+                                          >
                                             [{formatTime(seg.start_time)} - {formatTime(seg.end_time)}]
-                                          </span>
+                                          </button>
                                           <span className={`lang-pill ${seg.language_code.toLowerCase()}`}>
                                             {seg.language_code}
                                           </span>
@@ -2139,6 +2955,41 @@ export const App: React.FC = () => {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* Pagination Controls */}
+          {totalPages > 1 && (
+            <div className="pagination-controls">
+              <span>
+                Showing {meetings.length} of {totalMeetingsCount} meetings &bull; Page {currentPage} of {totalPages}
+              </span>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <button
+                  type="button"
+                  className="btn-copy"
+                  disabled={currentPage <= 1}
+                  onClick={() => {
+                    const prevP = Math.max(1, currentPage - 1);
+                    setCurrentPage(prevP);
+                    loadMeetings(prevP);
+                  }}
+                >
+                  Previous
+                </button>
+                <button
+                  type="button"
+                  className="btn-copy"
+                  disabled={currentPage >= totalPages}
+                  onClick={() => {
+                    const nextP = Math.min(totalPages, currentPage + 1);
+                    setCurrentPage(nextP);
+                    loadMeetings(nextP);
+                  }}
+                >
+                  Next
+                </button>
+              </div>
             </div>
           )}
         </section>
@@ -2341,10 +3192,117 @@ export const App: React.FC = () => {
         )}
       </main>
 
+      {/* Create Project Modal */}
+      {showNewProjectModal && (
+        <div className="modal-backdrop" onClick={() => setShowNewProjectModal(false)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ margin: '0 0 1rem 0', color: '#f8fafc', fontSize: '1.1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Folder size={18} color="#818cf8" /> Create New Project
+            </h3>
+            <form onSubmit={handleCreateProject}>
+              <div className="form-group" style={{ marginBottom: '1rem' }}>
+                <label className="form-label">Project Name</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. Q4 Strategy Initiative"
+                  value={newProjectName}
+                  onChange={(e) => setNewProjectName(e.target.value)}
+                  required
+                  autoFocus
+                />
+              </div>
+              <div className="form-group" style={{ marginBottom: '1.25rem' }}>
+                <label className="form-label">Description (Optional)</label>
+                <textarea
+                  className="form-input"
+                  rows={3}
+                  placeholder="Brief project goals or team context"
+                  value={newProjectDesc}
+                  onChange={(e) => setNewProjectDesc(e.target.value)}
+                />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+                <button
+                  type="button"
+                  className="btn-copy"
+                  onClick={() => setShowNewProjectModal(false)}
+                  disabled={isCreatingProject}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  disabled={!newProjectName.trim() || isCreatingProject}
+                >
+                  {isCreatingProject ? 'Creating...' : 'Create Project'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Full Meeting Deletion Modal */}
+      {meetingToDelete && (
+        <div className="modal-backdrop" onClick={() => !isDeletingMeeting && setMeetingToDelete(null)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ margin: '0 0 1rem 0', color: '#f87171', fontSize: '1.1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <AlertTriangle size={18} /> Confirm Meeting Deletion
+            </h3>
+            <p style={{ color: '#cbd5e1', fontSize: '0.875rem', lineHeight: 1.5, marginBottom: '1.25rem' }}>
+              Are you sure you want to permanently delete <strong>"{meetingToDelete.title}"</strong>?
+              <br /><br />
+              This operation will permanently delete all associated media files, transcripts, chunks, memory indexes, and intelligence records. This action cannot be undone.
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+              <button
+                type="button"
+                className="btn-copy"
+                onClick={() => setMeetingToDelete(null)}
+                disabled={isDeletingMeeting}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn-delete-meeting"
+                style={{ background: '#dc2626', color: '#fff', border: 'none', padding: '0.5rem 1rem' }}
+                onClick={handleConfirmDeleteMeeting}
+                disabled={isDeletingMeeting}
+              >
+                {isDeletingMeeting ? 'Deleting...' : 'Permanently Delete Meeting'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Floating Ask MEMORA AI Assistant Shortcut */}
+      <FloatingAskMemora
+        onClick={handleFloatingAskMemoraClick}
+        activeMeetingTitle={(() => {
+          const mId = pendingAskMeetingId ||
+                      Object.keys(expandedIntelligence).find((id) => !!expandedIntelligence[id]) ||
+                      Object.keys(expandedTranscripts).find((id) => !!expandedTranscripts[id]);
+          if (!mId) return null;
+          const m = meetings.find((x) => x.id === mId);
+          return m ? m.title : null;
+        })()}
+        activeProjectName={(() => {
+          const pId = pendingAskProjectId || filterProjectId;
+          if (!pId) return null;
+          const p = projects.find((x) => x.id === pId);
+          return p ? p.name : null;
+        })()}
+        isVisible={isAuthenticated && !!currentOrg}
+      />
+
       {/* Footer */}
       <footer className="app-footer">
         <p>
-          Multilingual Meeting Intelligence System &bull; Phase 4: Multilingual ASR Pipeline Active &bull; Local GPU Execution (RTX 5060)
+          MEMORA &bull; Organizational Memory &amp; Dual-Source RAG Platform
         </p>
       </footer>
     </div>

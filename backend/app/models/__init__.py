@@ -2,6 +2,7 @@
 from app.database.base import Base
 from app.models.base import UUIDMixin, TimestampMixin, utc_now
 from app.models.identity import User, Organization, OrganizationMembership, OrgRole
+from app.models.project import Project
 from app.models.meeting import (
     Meeting,
     MeetingParticipant,
@@ -48,6 +49,7 @@ __all__ = [
     "Organization",
     "OrganizationMembership",
     "OrgRole",
+    "Project",
     # Meeting
     "Meeting",
     "MeetingParticipant",

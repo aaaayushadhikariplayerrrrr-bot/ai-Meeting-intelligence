@@ -370,3 +370,15 @@ def update_action_item_status(
     )
 
     return ActionItemResponse.model_validate(action_item)
+
+
+# Register export PDF endpoint on intelligence router as well for direct /api/v1/meetings/{id}/export/pdf access
+from app.api.endpoints.media import export_meeting_pdf_report  # noqa: E402
+
+router.add_api_route(
+    "/meetings/{meeting_id}/export/pdf",
+    export_meeting_pdf_report,
+    methods=["GET"],
+    summary="Export Meeting Intelligence Report as PDF",
+    description="Generates a downloadable, publication-grade executive report PDF containing meeting metadata, participants, executive summary, topics, decisions, action items, risks, and transcript evidence.",
+)

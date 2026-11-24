@@ -317,7 +317,8 @@ def test_gemini_fallback_to_deterministic_on_provider_error(db_session):
     mock_err_response.text = "Model is overloaded"
 
     extractor = GeminiExtractor(api_key="mock-key", model_name="gemini-3.8-flash")
-    with patch.object(extractor.client, "post", side_effect=httpx.HTTPStatusError("503", request=MagicMock(), response=mock_err_response)):
+    with patch.object(extractor.client, "post", side_effect=httpx.HTTPStatusError("503", request=MagicMock(), response=mock_err_response)), \
+         patch("app.services.intelligence.engine.OllamaExtractor.extract", side_effect=ProviderExecutionError("Ollama daemon offline")):
         result = extract_meeting_intelligence(
             meeting_id=meeting.id,
             db=db_session,
@@ -480,7 +481,7 @@ def test_live_gemini_api_controlled_verification():
     extractor = GeminiExtractor(
         api_key=settings.GEMINI_API_KEY,
         model_name=settings.GEMINI_MODEL,
-        timeout=30.0,
+        timeout=settings.GEMINI_REQUEST_TIMEOUT_SECONDS,
     )
 
     sample_transcript = (

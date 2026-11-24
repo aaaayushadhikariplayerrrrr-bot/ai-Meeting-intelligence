@@ -112,6 +112,7 @@ class StructuredMemoryRetriever:
         organization_id: str,
         query: str,
         meeting_id: Optional[str] = None,
+        project_id: Optional[str] = None,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
         max_per_type: int = 5,
@@ -427,6 +428,23 @@ class StructuredMemoryRetriever:
                 organization_id=organization_id,
                 subject_filter=search_term,
             )
+
+        # Filter all retrieved items by project_id if specified
+        if project_id:
+            proj_meeting_ids = set(
+                r[0] for r in db.query(Meeting.id).filter(
+                    Meeting.project_id == project_id,
+                    Meeting.organization_id == organization_id
+                ).all()
+            )
+            retrieved_decisions = [d for d in retrieved_decisions if d.meeting_id in proj_meeting_ids]
+            retrieved_commitments = [c for c in retrieved_commitments if c.meeting_id in proj_meeting_ids]
+            retrieved_questions = [q for q in retrieved_questions if q.meeting_id in proj_meeting_ids]
+            proj_dec_ids = {d.id for d in retrieved_decisions}
+            detected_conflicts = [
+                c for c in detected_conflicts
+                if (c.decision_a_id in proj_dec_ids or c.decision_b_id in proj_dec_ids)
+            ]
 
         has_evidence = bool(
             retrieved_decisions or retrieved_commitments or retrieved_questions or detected_conflicts

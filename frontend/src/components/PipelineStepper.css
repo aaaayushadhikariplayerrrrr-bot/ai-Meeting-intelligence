@@ -1,0 +1,345 @@
+/* =========================================================
+   MEMORA — CONNECTED FIVE-STAGE PROCESSING WORKFLOW
+   ========================================================= */
+
+.pipeline-stepper {
+  background: rgba(13, 17, 26, 0.55);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 0.85rem 1.15rem;
+  margin: 0.75rem 0;
+  position: relative;
+  transition: border-color 0.2s ease;
+}
+
+.pipeline-stepper:hover {
+  border-color: var(--border-hover);
+}
+
+.pipeline-track {
+  display: flex;
+  align-items: flex-start;
+  width: 100%;
+}
+
+/* Individual Stage Column */
+.pipeline-stage-item {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  padding-right: 0.65rem;
+  transition: opacity 0.15s ease;
+}
+
+.pipeline-stage-item:last-child {
+  padding-right: 0;
+}
+
+/* Node & Connecting Line Row */
+.stage-node-row {
+  display: flex;
+  align-items: center;
+  position: relative;
+  margin-bottom: 0.55rem;
+  width: 100%;
+  height: 24px;
+}
+
+/* Circular Stage Node */
+.stage-node {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  z-index: 2;
+  background: var(--bg-card, #0f172a);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text-muted);
+  transition: all 0.2s ease;
+}
+
+/* Connecting Line Between Stages */
+.stage-connector {
+  position: absolute;
+  top: 50%;
+  left: 24px;
+  right: -0.65rem;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.08);
+  transform: translateY(-50%);
+  z-index: 1;
+  transition: background 0.25s ease;
+}
+
+/* Completed State Accents (Restrained Emerald) */
+.pipeline-stage-item.completed .stage-node {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.35);
+  color: #34d399;
+}
+
+.stage-connector.completed {
+  background: rgba(16, 185, 129, 0.35);
+}
+
+/* In Progress State (Restrained Indigo) */
+.pipeline-stage-item.in_progress .stage-node {
+  background: rgba(99, 102, 241, 0.14);
+  border-color: rgba(99, 102, 241, 0.45);
+  color: #a5b4fc;
+}
+
+/* Failed State (Restrained Red) */
+.pipeline-stage-item.failed .stage-node {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.45);
+  color: #f87171;
+}
+
+/* Ready / Pending / Idle States */
+.pipeline-stage-item.ready .stage-node {
+  background: rgba(255, 255, 255, 0.035);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: #94a3b8;
+}
+
+.pipeline-stage-item.pending .stage-node,
+.pipeline-stage-item.idle .stage-node {
+  background: rgba(255, 255, 255, 0.02);
+  border-color: rgba(255, 255, 255, 0.06);
+  color: #64748b;
+  opacity: 0.75;
+}
+
+/* Content Area */
+.stage-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.stage-label-row {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.stage-title {
+  font-size: 0.775rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+
+.pipeline-stage-item.completed .stage-title {
+  color: #f8fafc;
+}
+
+.pipeline-stage-item.pending .stage-title,
+.pipeline-stage-item.idle .stage-title {
+  color: #94a3b8;
+}
+
+.pipeline-stage-item.failed .stage-title {
+  color: #fca5a5;
+}
+
+/* Status Indicators */
+.stage-status-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.stage-status-indicator.completed {
+  color: #34d399;
+}
+
+.stage-status-indicator.in_progress {
+  color: #818cf8;
+}
+
+.stage-status-indicator.failed {
+  color: #f87171;
+}
+
+/* Sublabel / Description */
+.stage-sublabel {
+  font-size: 0.675rem;
+  color: var(--text-muted);
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pipeline-stage-item.completed .stage-sublabel {
+  color: #94a3b8;
+}
+
+/* Slim In-Progress Progress Bar */
+.stage-progress-track {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 9999px;
+  height: 3px;
+  margin-top: 0.3rem;
+  overflow: hidden;
+}
+
+.stage-progress-bar {
+  height: 100%;
+  border-radius: 9999px;
+  background: var(--accent-primary, #6366f1);
+  transition: width 0.3s ease;
+}
+
+/* Spin Animation */
+.spin {
+  animation: spinLoader 1.2s linear infinite;
+}
+
+@keyframes spinLoader {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Failed Stage Error and Retry Box */
+.stage-retry-container {
+  margin-top: 0.3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.stage-error-message {
+  font-size: 0.65rem;
+  color: #fca5a5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stage-retry-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  font-size: 0.65rem;
+  font-weight: 500;
+  padding: 0.15rem 0.45rem;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #fca5a5;
+  border-radius: 4px;
+  cursor: pointer;
+  width: fit-content;
+  transition: all 0.15s ease;
+}
+
+.stage-retry-button:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.22);
+  border-color: rgba(239, 68, 68, 0.5);
+  color: #ffffff;
+}
+
+.stage-retry-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* =========================================================
+   RESPONSIVE DESIGN
+   ========================================================= */
+
+/* Tablet (Narrower Desktop / Tablet Horizontal) */
+@media (max-width: 860px) and (min-width: 601px) {
+  .pipeline-stepper {
+    padding: 0.75rem 0.9rem;
+  }
+
+  .pipeline-stage-item {
+    padding-right: 0.4rem;
+  }
+
+  .stage-connector {
+    right: -0.4rem;
+  }
+
+  .stage-title {
+    font-size: 0.725rem;
+  }
+
+  .stage-sublabel {
+    font-size: 0.625rem;
+  }
+}
+
+/* Mobile: Clean Vertical Workflow Timeline */
+@media (max-width: 600px) {
+  .pipeline-stepper {
+    padding: 0.85rem 1rem;
+  }
+
+  .pipeline-track {
+    flex-direction: column;
+  }
+
+  .pipeline-stage-item {
+    flex-direction: row;
+    align-items: flex-start;
+    padding-right: 0;
+    padding-bottom: 0.85rem;
+    width: 100%;
+  }
+
+  .pipeline-stage-item:last-child {
+    padding-bottom: 0;
+  }
+
+  .stage-node-row {
+    width: 24px;
+    height: auto;
+    margin-bottom: 0;
+    margin-right: 0.75rem;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .stage-connector {
+    top: 24px;
+    bottom: -0.85rem;
+    left: 50%;
+    right: auto;
+    width: 1px;
+    height: auto;
+    transform: translateX(-50%);
+  }
+
+  .stage-content {
+    flex: 1;
+    min-width: 0;
+    padding-top: 1px;
+  }
+
+  .stage-title {
+    font-size: 0.8rem;
+  }
+
+  .stage-sublabel {
+    font-size: 0.7rem;
+    white-space: normal;
+  }
+}

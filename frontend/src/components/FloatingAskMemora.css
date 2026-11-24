@@ -1,0 +1,114 @@
+/* Floating Ask MEMORA Button Container */
+.floating-ask-memora-wrapper {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 990;
+  pointer-events: auto;
+}
+
+/* Floating Action Button (Linear / Notion Elevation & Depth) */
+.floating-ask-memora-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.65rem 1.15rem;
+  background: linear-gradient(180deg, #4f46e5 0%, #4338ca 100%);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 9999px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.1) inset;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+}
+
+.floating-ask-memora-btn:hover {
+  transform: translateY(-1px);
+  background: linear-gradient(180deg, #5b54ea 0%, #4c41d9 100%);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.2) inset;
+  border-color: rgba(255, 255, 255, 0.24);
+}
+
+.floating-ask-memora-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.1) inset;
+}
+
+.floating-ask-memora-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), 0 0 0 2px var(--accent-primary);
+}
+
+/* Subtle Ambient Gradient behind the button */
+.floating-btn-glow {
+  position: absolute;
+  inset: -1px;
+  border-radius: 9999px;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(139, 92, 246, 0.25));
+  filter: blur(6px);
+  z-index: -1;
+  opacity: 0.45;
+  transition: opacity 0.25s ease;
+}
+
+.floating-ask-memora-btn:hover .floating-btn-glow {
+  opacity: 0.75;
+}
+
+/* Sparkles Icon Wrapper */
+.floating-btn-icon-pulse {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fbbf24;
+  transition: transform 0.2s ease;
+}
+
+.floating-ask-memora-btn:hover .floating-btn-icon-pulse {
+  transform: scale(1.08);
+}
+
+.floating-btn-icon {
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.35));
+}
+
+.floating-btn-text {
+  font-weight: 600;
+  color: #ffffff;
+}
+
+/* Context Badge on the Floating Button */
+.floating-btn-context-pill {
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0.12rem 0.45rem;
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 9999px;
+  color: #e0e7ff;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+/* Mobile & Small Screen Adaptations */
+@media (max-width: 768px) {
+  .floating-ask-memora-wrapper {
+    bottom: 16px;
+    right: 16px;
+  }
+
+  .floating-ask-memora-btn {
+    padding: 0.55rem 0.95rem;
+    font-size: 0.8rem;
+    gap: 0.4rem;
+  }
+
+  .floating-btn-context-pill {
+    display: none;
+  }
+}

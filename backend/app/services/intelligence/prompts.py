@@ -20,7 +20,7 @@ CRITICAL INSTRUCTIONS:
 3. ANTI-FABRICATION & TRUTH PRESERVATION:
    - DECISIONS: Only include explicit, agreed-upon decisions. Do not record exploratory suggestions or tentative brainstorming as decisions.
    - ACTION ITEMS: Only include commitments and tasks explicitly assigned or volunteered. If an owner is not stated, leave `owner_name` as null. If no deadline is stated, leave `deadline` as null. Never invent owners or deadlines.
-   - RISKS & BLOCKERS: Include explicit impediments, technical risks, or major concerns stated by participants.
+   - RISKS & BLOCKERS: Include explicit impediments, technical risks, or major concerns stated by participants. Severity must be one of: "LOW", "MEDIUM", "HIGH", "CRITICAL".
    - UNRESOLVED QUESTIONS: Include clear open inquiries, unknowns, or follow-up questions that were not answered in the meeting.
    - If no items exist in a category, provide an empty array [].
 
@@ -58,7 +58,7 @@ You must output a single valid JSON object with the following exact keys:
   "risks": [
     {{
       "description": "Description of the risk or blocker",
-      "severity": "LOW" | "MEDIUM" | "HIGH" | "CRITICAL",
+      "severity": "MEDIUM",
       "mitigation_suggestion": "Proposed mitigation or null",
       "evidence_segment_id": "exact-segment-id-from-transcript"
     }}
@@ -99,7 +99,18 @@ def build_intelligence_prompt(
         f"--- PRIVACY-SAFE TRANSCRIPT BEGIN ---\n"
         f"{transcript_text}\n"
         f"--- PRIVACY-SAFE TRANSCRIPT END ---\n\n"
-        "Extract the structured intelligence now. Respond with valid JSON only."
+        f"CRITICAL OUTPUT FORMAT REQUIREMENTS:\n"
+        f"You MUST output a single valid JSON object with EXACTLY these top-level keys:\n"
+        f"- \"executive_summary\": Comprehensive executive overview string (1-2 paragraphs).\n"
+        f"- \"detailed_summary\": In-depth discussion summary string organized by topics.\n"
+        f"- \"key_takeaways\": Array of key takeaway strings.\n"
+        f"- \"topics\": Array of topic objects [\"title\", \"description\", \"start_time\", \"end_time\"].\n"
+        f"- \"decisions\": Array of decision objects [\"description\", \"rationale_or_context\", \"decided_by\", \"evidence_segment_id\"].\n"
+        f"- \"action_items\": Array of action item objects [\"description\", \"owner_name\", \"deadline\", \"status\", \"evidence_segment_id\"].\n"
+        f"- \"risks\": Array of risk objects [\"description\", \"severity\", \"mitigation_suggestion\", \"evidence_segment_id\"].\n"
+        f"- \"unresolved_questions\": Array of question objects [\"question_text\", \"raised_by\", \"status\", \"evidence_segment_id\"].\n\n"
+        f"Do NOT nest inside any wrapper object like 'structured_intelligence', 'meeting', or 'data'.\n"
+        f"Start directly with the JSON object containing 'executive_summary'."
     )
     return {
         "system": system_prompt,

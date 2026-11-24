@@ -68,7 +68,7 @@ export const OrgSelectionScreen: React.FC = () => {
 
         <div className="org-list">
           {organizations.map((org) => {
-            const isAdmin = org.role === 'ORG_ADMIN';
+            const isAdmin = org.role === 'ORG_ADMIN' || org.role === 'INDIVIDUAL';
             return (
               <button
                 key={org.organization_id}

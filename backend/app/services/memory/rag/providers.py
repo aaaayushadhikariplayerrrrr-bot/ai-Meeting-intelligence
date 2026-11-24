@@ -18,6 +18,8 @@ from app.services.memory.rag.types import (
     AbstentionStatus,
     DecisionConflictItem,
     TranscriptConflictItem,
+    ExternalKnowledgeResult,
+    ExternalKnowledgeCitation,
 )
 
 logger = logging.getLogger(__name__)
@@ -33,6 +35,7 @@ class AnswerProvider(ABC):
         evidence_items: List[EvidenceItem],
         output_language: str = "en",
         structured_context: Optional[Any] = None,
+        external_knowledge: Optional[ExternalKnowledgeResult] = None,
     ) -> RawAnswerResult:
         """Generate a grounded factual answer from assembled evidence items."""
         pass
@@ -455,12 +458,44 @@ class DeterministicAnswerProvider(AnswerProvider):
 
         return lines
 
+    def _format_external_knowledge_section(
+        self,
+        external_knowledge: Optional[ExternalKnowledgeResult],
+    ) -> str:
+        """Format an external background knowledge section with clear separation and citations."""
+        if not external_knowledge:
+            return ""
+
+        if not getattr(external_knowledge, "is_available", True):
+            reason = external_knowledge.unavailability_reason or "External knowledge source unreachable"
+            return (
+                f"\n\n### External Background Knowledge: {external_knowledge.subject}\n"
+                f"*Note: External background retrieval for '{external_knowledge.subject}' was unavailable ({reason}).*"
+            )
+
+        lines = [
+            f"\n\n### External Background Knowledge: {external_knowledge.subject}",
+            f"> *Note: {external_knowledge.disclaimer}*",
+            f"\n**Overview:**\n{external_knowledge.summary}",
+        ]
+        if external_knowledge.key_facts:
+            lines.append("\n**Key Facts:**")
+            for fact in external_knowledge.key_facts:
+                lines.append(f"- {fact}")
+        if external_knowledge.citations:
+            lines.append("\n**External Sources:**")
+            for cit in external_knowledge.citations:
+                lines.append(f"- [{cit.source_title}]({cit.source_url})")
+
+        return "\n".join(lines)
+
     def generate_answer(
         self,
         question: str,
         evidence_items: List[EvidenceItem],
         output_language: str = "en",
         structured_context: Optional[Any] = None,
+        external_knowledge: Optional[ExternalKnowledgeResult] = None,
     ) -> RawAnswerResult:
         """Deterministically synthesize a grounded factual response from retrieved evidence and structured memory."""
         # 1. Check for explicit decision conflicts detected in structured records (P2)
@@ -509,7 +544,7 @@ class DeterministicAnswerProvider(AnswerProvider):
                     conflict_cited_ids = [item.chunk_id for item in evidence_items[:2]]
 
             return RawAnswerResult(
-                answer_text="\n".join(answer_parts),
+                answer_text="\n".join(answer_parts) + self._format_external_knowledge_section(external_knowledge),
                 cited_chunk_ids=conflict_cited_ids,
                 abstention_status=AbstentionStatus.CONFLICTING_EVIDENCE,
                 abstention_reason="Potential contradiction detected between active decisions without explicit superseding link.",
@@ -519,6 +554,7 @@ class DeterministicAnswerProvider(AnswerProvider):
                 structured_decisions=[d.model_dump() for d in structured_context.decisions] if structured_context and getattr(structured_context, "decisions", None) else [],
                 structured_commitments=[c.model_dump() for c in structured_context.commitments] if structured_context and getattr(structured_context, "commitments", None) else [],
                 structured_questions=[q.model_dump() for q in structured_context.questions] if structured_context and getattr(structured_context, "questions", None) else [],
+                external_knowledge=external_knowledge,
             )
 
         # 2. Check for relevant structured records (Decisions, Commitments, Questions)
@@ -657,7 +693,7 @@ class DeterministicAnswerProvider(AnswerProvider):
                     structured_cited_ids.append(item.chunk_id)
                     answer_sections.append(f'- In \'{item.meeting_title}\': "{condensed}" [{item.chunk_id}]')
 
-            full_answer = "\n".join(answer_sections)
+            full_answer = "\n".join(answer_sections) + self._format_external_knowledge_section(external_knowledge)
             return RawAnswerResult(
                 answer_text=full_answer,
                 cited_chunk_ids=structured_cited_ids,
@@ -669,17 +705,22 @@ class DeterministicAnswerProvider(AnswerProvider):
                 structured_commitments=[c.model_dump() for c in structured_context.commitments] if structured_context and getattr(structured_context, "commitments", None) else [],
                 structured_questions=[q.model_dump() for q in structured_context.questions] if structured_context and getattr(structured_context, "questions", None) else [],
                 detected_conflicts=conflicts or [],
+                external_knowledge=external_knowledge,
             )
 
         # 3. No evidence check (neither structured nor transcript)
         if not evidence_items:
+            no_ev_answer = "No relevant meeting discussions or decisions were found in your organization's recorded meetings for this question."
+            if external_knowledge:
+                no_ev_answer += self._format_external_knowledge_section(external_knowledge)
             return RawAnswerResult(
-                answer_text="No relevant meeting discussions or decisions were found in your organization's recorded meetings for this question.",
+                answer_text=no_ev_answer,
                 cited_chunk_ids=[],
                 abstention_status=AbstentionStatus.NO_EVIDENCE,
                 abstention_reason="No matching meeting evidence retrieved for query.",
                 provider_used="deterministic",
                 is_heuristic=True,
+                external_knowledge=external_knowledge,
             )
 
         keywords = self._extract_query_keywords(question)
@@ -699,16 +740,20 @@ class DeterministicAnswerProvider(AnswerProvider):
                 if any(self._matches_keyword_or_stem(item.text, [e]) for e in entities)
             ]
             if not entity_matched_items:
+                insufficient_entity_text = (
+                    f"Retrieved meeting discussions mention related organizational background, "
+                    f"but contain insufficient factual evidence or decisions regarding '{', '.join(entities)}'."
+                )
+                if external_knowledge:
+                    insufficient_entity_text += self._format_external_knowledge_section(external_knowledge)
                 return RawAnswerResult(
-                    answer_text=(
-                        f"Retrieved meeting discussions mention related organizational background, "
-                        f"but contain insufficient factual evidence or decisions regarding '{', '.join(entities)}'."
-                    ),
+                    answer_text=insufficient_entity_text,
                     cited_chunk_ids=[],
                     abstention_status=AbstentionStatus.INSUFFICIENT_EVIDENCE,
                     abstention_reason=f"Retrieved evidence does not mention queried entity '{', '.join(entities)}'.",
                     provider_used="deterministic",
                     is_heuristic=True,
+                    external_knowledge=external_knowledge,
                 )
 
             # Check for multi-meeting disjoint evidence (P1 Requirement 4):
@@ -727,16 +772,20 @@ class DeterministicAnswerProvider(AnswerProvider):
                     for item in entity_matched_items
                 )
                 if not has_substantive_support:
+                    insufficient_action_text = (
+                        f"Retrieved meeting discussions mention '{', '.join(entities)}', "
+                        f"but do not establish a confirmed decision, approval, selection, or adoption."
+                    )
+                    if external_knowledge:
+                        insufficient_action_text += self._format_external_knowledge_section(external_knowledge)
                     return RawAnswerResult(
-                        answer_text=(
-                            f"Retrieved meeting discussions mention '{', '.join(entities)}', "
-                            f"but do not establish a confirmed decision, approval, selection, or adoption."
-                        ),
+                        answer_text=insufficient_action_text,
                         cited_chunk_ids=[],
                         abstention_status=AbstentionStatus.INSUFFICIENT_EVIDENCE,
                         abstention_reason="Evidence mentions the entity but does not support the queried decision or action.",
                         provider_used="deterministic",
                         is_heuristic=True,
+                        external_knowledge=external_knowledge,
                     )
 
             relevant_items = entity_matched_items
@@ -752,16 +801,20 @@ class DeterministicAnswerProvider(AnswerProvider):
             relevant_items = []
 
         if not relevant_items:
+            insufficient_rel_text = (
+                "Retrieved meeting discussions mention related organizational background, "
+                "but contain insufficient factual evidence to answer this specific question."
+            )
+            if external_knowledge:
+                insufficient_rel_text += self._format_external_knowledge_section(external_knowledge)
             return RawAnswerResult(
-                answer_text=(
-                    "Retrieved meeting discussions mention related organizational background, "
-                    "but contain insufficient factual evidence to answer this specific question."
-                ),
+                answer_text=insufficient_rel_text,
                 cited_chunk_ids=[],
                 abstention_status=AbstentionStatus.INSUFFICIENT_EVIDENCE,
                 abstention_reason="Retrieved evidence does not contain relevant query keywords or details.",
                 provider_used="deterministic",
                 is_heuristic=True,
+                external_knowledge=external_knowledge,
             )
 
         # 5. Check for cross-meeting conflicts in transcript passages (P4)
@@ -795,13 +848,14 @@ class DeterministicAnswerProvider(AnswerProvider):
                 suggested_action="Review the cited meeting segments to determine whether the policy was updated or remains disputed.",
             )
             return RawAnswerResult(
-                answer_text=conflict_text,
+                answer_text=conflict_text + self._format_external_knowledge_section(external_knowledge),
                 cited_chunk_ids=[aff_item.chunk_id, neg_item.chunk_id],
                 abstention_status=AbstentionStatus.CONFLICTING_EVIDENCE,
                 abstention_reason=f"Conflicting decisions/statements found between '{aff_item.meeting_title}' and '{neg_item.meeting_title}'.",
                 provider_used="deterministic",
                 is_heuristic=True,
                 transcript_conflicts=[transcript_conflict],
+                external_knowledge=external_knowledge,
             )
 
         # 6. Standard Factual Evidence Synthesis grouped by meeting
@@ -839,9 +893,29 @@ class DeterministicAnswerProvider(AnswerProvider):
                 seen_texts.add(condensed)
                 cited_chunk_ids.append(item.chunk_id)
                 prefix = "- " if is_multi_meeting else ""
-                answer_lines.append(f'{prefix}"{condensed}" [{item.chunk_id}]')
+                time_range = ""
+                if item.start_time is not None and item.end_time is not None and item.end_time > 0:
+                    s_m, s_s = divmod(int(item.start_time), 60)
+                    e_m, e_s = divmod(int(item.end_time), 60)
+                    time_range = f" [{s_m:02d}:{s_s:02d} - {e_m:02d}:{e_s:02d}]"
+                answer_lines.append(f'{prefix}"{condensed}"{time_range} [{item.chunk_id}]')
 
         full_answer = "\n".join(answer_lines)
+        if external_knowledge:
+            # Check if any evidence item mentioned the subject
+            subj_tokens = [w for w in re.findall(r"[\w]+", external_knowledge.subject.lower()) if len(w) > 2]
+            mentioned_in_meeting = any(
+                external_knowledge.subject.lower() in item.text.lower()
+                or self._matches_keyword_or_stem(item.text, subj_tokens)
+                for item in relevant_items
+            )
+            if mentioned_in_meeting:
+                full_answer += (
+                    f"\n\n*Meeting Context Note: '{external_knowledge.subject}' was mentioned in the meeting, "
+                    f"but was not explained or defined in detail during the discussion.*"
+                )
+            full_answer += self._format_external_knowledge_section(external_knowledge)
+
         return RawAnswerResult(
             answer_text=full_answer,
             cited_chunk_ids=cited_chunk_ids,
@@ -849,6 +923,7 @@ class DeterministicAnswerProvider(AnswerProvider):
             abstention_reason=None,
             provider_used="deterministic",
             is_heuristic=True,
+            external_knowledge=external_knowledge,
         )
 
 
@@ -878,6 +953,7 @@ class OllamaAnswerProvider(AnswerProvider):
         evidence_items: List[EvidenceItem],
         output_language: str = "en",
         structured_context: Optional[Any] = None,
+        external_knowledge: Optional[ExternalKnowledgeResult] = None,
     ) -> RawAnswerResult:
         """Call Ollama /api/generate with assembled context and extract cited chunk IDs."""
         has_any_evidence = bool(
@@ -897,6 +973,7 @@ class OllamaAnswerProvider(AnswerProvider):
                 abstention_reason="No matching meeting evidence retrieved for query.",
                 provider_used="ollama",
                 is_heuristic=False,
+                external_knowledge=external_knowledge,
             )
 
         prompts = self.context_builder.build_llm_prompt(
@@ -904,6 +981,7 @@ class OllamaAnswerProvider(AnswerProvider):
             evidence_items=evidence_items,
             output_language=output_language,
             structured_context=structured_context,
+            external_knowledge=external_knowledge,
         )
 
         request_body = {
@@ -952,6 +1030,7 @@ class OllamaAnswerProvider(AnswerProvider):
                 abstention_reason="LLM indicated evidence was insufficient." if is_abstained else None,
                 provider_used="ollama",
                 is_heuristic=False,
+                external_knowledge=external_knowledge,
             )
 
         except (httpx.ConnectError, httpx.TimeoutException) as conn_err:
@@ -998,6 +1077,7 @@ class GeminiAnswerProvider(AnswerProvider):
         evidence_items: Optional[List[EvidenceItem]] = None,
         output_language: str = "en",
         structured_context: Optional[Any] = None,
+        external_knowledge: Optional[ExternalKnowledgeResult] = None,
         *,
         query: Optional[str] = None,
         evidence_chunks: Optional[List[Any]] = None,
@@ -1010,11 +1090,14 @@ class GeminiAnswerProvider(AnswerProvider):
             raise ProviderExecutionError("Gemini API key is not configured.")
 
         if not effective_ev and (not structured_context or not getattr(structured_context, "has_structured_evidence", False)):
+            no_ev_txt = "No relevant meeting discussions or decisions were found in your organization's recorded meetings for this question."
+            if external_knowledge and getattr(external_knowledge, "is_available", False):
+                no_ev_txt += f"\n\n### External Background Knowledge: {external_knowledge.subject}\n> *Note: {external_knowledge.disclaimer}*\n\n**Overview:**\n{external_knowledge.summary}"
             if query is not None or evidence_chunks is not None:
                 from app.schemas.memory import RAGQueryResponse, RetrievalDiagnostics
                 return RAGQueryResponse(
                     question=effective_q,
-                    answer="No relevant meeting discussions or decisions were found in your organization's recorded meetings for this question.",
+                    answer=no_ev_txt,
                     citations=[],
                     abstention_status=AbstentionStatus.NO_EVIDENCE,
                     is_abstained=True,
@@ -1023,14 +1106,16 @@ class GeminiAnswerProvider(AnswerProvider):
                         provider_used="gemini",
                         is_heuristic=False,
                     ),
+                    external_knowledge=external_knowledge,
                 )
             return RawAnswerResult(
-                answer_text="No relevant meeting discussions or decisions were found in your organization's recorded meetings for this question.",
+                answer_text=no_ev_txt,
                 cited_chunk_ids=[],
                 abstention_status=AbstentionStatus.NO_EVIDENCE,
                 abstention_reason="Zero evidence items available.",
                 provider_used="gemini",
                 is_heuristic=False,
+                external_knowledge=external_knowledge,
             )
 
         prompts = self.context_builder.build_llm_prompt(
@@ -1038,6 +1123,7 @@ class GeminiAnswerProvider(AnswerProvider):
             evidence_items=effective_ev,
             output_language=output_language,
             structured_context=structured_context,
+            external_knowledge=external_knowledge,
         )
 
         request_body = {
@@ -1142,7 +1228,8 @@ class GeminiAnswerProvider(AnswerProvider):
                             query=effective_q,
                             provider_used="gemini",
                             is_heuristic=False,
-                        )
+                        ),
+                        external_knowledge=external_knowledge,
                     )
 
                 return RawAnswerResult(
@@ -1152,6 +1239,7 @@ class GeminiAnswerProvider(AnswerProvider):
                     abstention_reason="Evidence was insufficient to answer the question." if is_abstained else None,
                     provider_used="gemini",
                     is_heuristic=False,
+                    external_knowledge=external_knowledge,
                 )
 
             except httpx.ConnectError as ce:

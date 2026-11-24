@@ -1,7 +1,7 @@
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Tuple
+from typing import Tuple, Union
 
 from app.services.media_metadata import extract_media_metadata, MediaMetadata
 from app.services.media_storage import compute_sha256
@@ -13,8 +13,8 @@ class AudioExtractionError(Exception):
 
 
 def normalize_audio_for_asr(
-    input_media_path: Path,
-    output_wav_path: Path
+    input_media_path: Union[Path, str],
+    output_wav_path: Union[Path, str]
 ) -> Tuple[Path, MediaMetadata, str]:
     """Extract audio from input file (audio or video) and normalize to ASR standard:
     
@@ -29,6 +29,8 @@ def normalize_audio_for_asr(
     Raises:
         AudioExtractionError: if ffmpeg fails.
     """
+    input_media_path = Path(input_media_path)
+    output_wav_path = Path(output_wav_path)
     ffmpeg_bin = shutil.which("ffmpeg") or "ffmpeg"
     output_wav_path.parent.mkdir(parents=True, exist_ok=True)
 

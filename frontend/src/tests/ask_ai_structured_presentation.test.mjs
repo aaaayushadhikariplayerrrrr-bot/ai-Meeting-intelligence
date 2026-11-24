@@ -201,6 +201,22 @@ class AskAIStructuredPresentationSimulator {
       alertClass: 'memory-abstention-alert insufficient-evidence',
     };
   }
+
+  // External background knowledge card representation
+  renderExternalKnowledgeCard(extKnowledge) {
+    if (!extKnowledge) return null;
+    return {
+      badge: 'External Background Reference — Context Not Discussed in Meeting',
+      disclaimer: extKnowledge.disclaimer,
+      subject: extKnowledge.subject,
+      summary: extKnowledge.summary,
+      keyFacts: extKnowledge.key_facts || [],
+      citations: extKnowledge.citations || [],
+      providerUsed: extKnowledge.provider_used,
+      isAvailable: extKnowledge.is_available,
+      unavailabilityReason: extKnowledge.unavailability_reason || null,
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1035,4 +1051,175 @@ test('14. Transcript discussion contradictions render affirmative and opposing s
   assert.equal(tc.chunk_b_text.includes('rejected OAuth'), true);
   assert.equal(tc.is_heuristic, true);
   assert.equal(sim.queryResponse.citations.length, 2);
+});
+
+// ---------------------------------------------------------------------------
+// TEST 15: External Knowledge Card rendering with summary, key facts, and citations
+// ---------------------------------------------------------------------------
+test('15. External Knowledge Card renders dedicated background context, disclaimer, and source links', async () => {
+  const sim = new AskAIStructuredPresentationSimulator();
+
+  const mockResponse = {
+    question: 'What is the 103rd Constitutional Amendment about?',
+    answer: '### Meeting Discussion & Evidence\nBased on discussion in \'Policy Sync\':\n- In \'Policy Sync\' [04:10 - 04:45]: "We noted the 103rd Constitutional Amendment." [chunk-1]\n\n### External Background Knowledge: 103rd Constitutional Amendment\n> **Note:** External background knowledge retrieved for context.',
+    citations: [
+      {
+        citation_id: 'cit-1',
+        chunk_id: 'chunk-1',
+        meeting_id: 'meet-1',
+        meeting_title: 'Policy Sync',
+        meeting_date: '2026-03-10T10:00:00Z',
+        start_time: 250.0,
+        end_time: 285.0,
+        quoted_text: 'We noted the 103rd Constitutional Amendment.',
+      },
+    ],
+    abstention_status: 'ANSWER_SUPPORTED',
+    is_abstained: false,
+    diagnostics: {
+      query: 'What is the 103rd Constitutional Amendment about?',
+      total_candidates_retrieved: 1,
+      evidence_items_count: 1,
+      meetings_represented: ['meet-1'],
+      provider_used: 'wikipedia',
+      is_heuristic: true,
+    },
+    external_knowledge: {
+      subject: '103rd Constitutional Amendment',
+      summary: 'The 103rd Constitutional Amendment Act, 2019 introduces a 10% reservation for Economically Weaker Sections (EWS).',
+      key_facts: [
+        'Introduces 10% EWS reservation in education and civil posts.',
+        'Amended Articles 15 and 16 of the Constitution of India.',
+      ],
+      citations: [
+        {
+          source_title: 'Wikipedia: One Hundred and Third Amendment of the Constitution of India',
+          source_url: 'https://en.wikipedia.org/wiki/One_Hundred_and_Third_Amendment_of_the_Constitution_of_India',
+          snippet: 'Introduces 10% reservation for Economically Weaker Sections.',
+        },
+      ],
+      provider_used: 'wikipedia',
+      is_available: true,
+      unavailability_reason: null,
+      disclaimer: 'External background knowledge retrieved for context. This information was not discussed during your organization\'s meetings.',
+    },
+  };
+
+  await sim.submitAskQuery({ question: 'What is the 103rd Constitutional Amendment about?' }, async () => mockResponse);
+
+  assert.equal(sim.queryResponse.external_knowledge !== null, true);
+  const card = sim.renderExternalKnowledgeCard(sim.queryResponse.external_knowledge);
+
+  assert.equal(card.subject, '103rd Constitutional Amendment');
+  assert.equal(card.isAvailable, true);
+  assert.equal(card.providerUsed, 'wikipedia');
+  assert.equal(card.summary.includes('10% reservation for Economically Weaker Sections'), true);
+  assert.equal(card.keyFacts.length, 2);
+  assert.equal(card.citations.length, 1);
+  assert.equal(card.citations[0].source_url.includes('wikipedia.org'), true);
+  assert.equal(card.disclaimer.includes('was not discussed during your organization\'s meetings'), true);
+});
+
+// ---------------------------------------------------------------------------
+// TEST 16: External Knowledge unavailable state handling
+// ---------------------------------------------------------------------------
+test('16. External Knowledge unavailable reporting when external service is unreachable', async () => {
+  const sim = new AskAIStructuredPresentationSimulator();
+
+  const mockResponse = {
+    question: 'What is Quantum Computing Architecture?',
+    answer: 'No relevant meeting discussions or decisions were found in your organization\'s recorded meetings for this question.',
+    citations: [],
+    abstention_status: 'NO_EVIDENCE',
+    is_abstained: true,
+    diagnostics: {
+      query: 'What is Quantum Computing Architecture?',
+      total_candidates_retrieved: 0,
+      evidence_items_count: 0,
+      meetings_represented: [],
+      provider_used: 'unavailable',
+      is_heuristic: true,
+    },
+    external_knowledge: {
+      subject: 'Quantum Computing Architecture',
+      summary: 'External background knowledge for \'Quantum Computing Architecture\' could not be retrieved at this time.',
+      key_facts: [],
+      citations: [],
+      provider_used: 'unavailable',
+      is_available: false,
+      unavailability_reason: 'External knowledge sources are currently unreachable or offline.',
+      disclaimer: 'External background knowledge was requested for context, but external retrieval was unavailable.',
+    },
+  };
+
+  await sim.submitAskQuery({ question: 'What is Quantum Computing Architecture?' }, async () => mockResponse);
+
+  assert.equal(sim.queryResponse.is_abstained, true);
+  assert.equal(sim.queryResponse.abstention_status, 'NO_EVIDENCE');
+  const card = sim.renderExternalKnowledgeCard(sim.queryResponse.external_knowledge);
+
+  assert.equal(card.isAvailable, false);
+  assert.equal(card.unavailabilityReason.includes('unreachable or offline'), true);
+  assert.equal(card.citations.length, 0);
+});
+
+// ---------------------------------------------------------------------------
+// TEST 17: Strict separation of internal meeting evidence and external citations
+// ---------------------------------------------------------------------------
+test('17. Internal meeting citations and external citations remain strictly distinguished', async () => {
+  const sim = new AskAIStructuredPresentationSimulator();
+
+  const mockResponse = {
+    question: 'Tell me about OAuth 2.0',
+    answer: '### Meeting Discussion\nBased on discussion in \'Security Sync\':\n- "We plan to evaluate OAuth 2.0." [chunk-99]\n\n### External Background Knowledge: OAuth 2.0',
+    citations: [
+      {
+        citation_id: 'cit-meet-1',
+        chunk_id: 'chunk-99',
+        meeting_id: 'meeting-sec',
+        meeting_title: 'Security Sync',
+        meeting_date: '2026-05-01T10:00:00Z',
+        start_time: 120.0,
+        end_time: 140.0,
+        quoted_text: 'We plan to evaluate OAuth 2.0.',
+      },
+    ],
+    abstention_status: 'ANSWER_SUPPORTED',
+    is_abstained: false,
+    diagnostics: {
+      query: 'Tell me about OAuth 2.0',
+      total_candidates_retrieved: 1,
+      evidence_items_count: 1,
+      meetings_represented: ['meeting-sec'],
+      provider_used: 'wikipedia',
+      is_heuristic: true,
+    },
+    external_knowledge: {
+      subject: 'OAuth 2.0',
+      summary: 'OAuth 2.0 is an authorization framework that enables applications to obtain limited access to user accounts on an HTTP service.',
+      key_facts: ['RFC 6749 authorization standard.'],
+      citations: [
+        {
+          source_title: 'IETF RFC 6749: The OAuth 2.0 Authorization Framework',
+          source_url: 'https://datatracker.ietf.org/doc/html/rfc6749',
+          snippet: 'The OAuth 2.0 authorization framework...',
+        },
+      ],
+      provider_used: 'wikipedia',
+      is_available: true,
+      disclaimer: 'External background knowledge retrieved for context.',
+    },
+  };
+
+  await sim.submitAskQuery({ question: 'Tell me about OAuth 2.0' }, async () => mockResponse);
+
+  // Meeting citations have meeting_id, chunk_id, and start_time
+  assert.equal(sim.queryResponse.citations.length, 1);
+  assert.equal(sim.queryResponse.citations[0].meeting_id, 'meeting-sec');
+  assert.equal(sim.queryResponse.citations[0].chunk_id, 'chunk-99');
+
+  // External citations have source_url and source_title, NO meeting_id
+  assert.equal(sim.queryResponse.external_knowledge.citations.length, 1);
+  assert.equal(sim.queryResponse.external_knowledge.citations[0].source_url.startsWith('https://'), true);
+  assert.equal(sim.queryResponse.external_knowledge.citations[0].meeting_id, undefined);
 });

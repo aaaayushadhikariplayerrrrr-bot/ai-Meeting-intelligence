@@ -461,10 +461,25 @@ test('12. ORG_ADMIN sees permitted admin actions (Delete Raw, Clean)', () => {
   const normalizedAsset = { id: 'asset-2', media_type: 'NORMALIZED_AUDIO', is_raw_deleted: false };
 
   // Guard logic from App.tsx:
-  // Delete Raw: currentOrg?.role === 'ORG_ADMIN' && asset.media_type !== 'NORMALIZED_AUDIO'
-  const canDeleteRaw = (org, asset) => org?.role === 'ORG_ADMIN' && asset.media_type !== 'NORMALIZED_AUDIO';
-  // Clean Transcript: currentOrg?.role === 'ORG_ADMIN'
-  const canCleanTranscript = (org) => org?.role === 'ORG_ADMIN';
+  // Delete Raw: (org?.role === 'ORG_ADMIN' || org?.role === 'INDIVIDUAL') && asset.media_type !== 'NORMALIZED_AUDIO'
+  const isWorkspaceAdmin = (org) => org?.role === 'ORG_ADMIN' || org?.role === 'INDIVIDUAL';
+  const canDeleteRaw = (org, asset) => isWorkspaceAdmin(org) && asset.media_type !== 'NORMALIZED_AUDIO';
+  // Clean Transcript: isWorkspaceAdmin(org)
+  const canCleanTranscript = (org) => isWorkspaceAdmin(org);
+
+  assert.strictEqual(canDeleteRaw(currentOrg, rawAsset), true);
+  assert.strictEqual(canDeleteRaw(currentOrg, normalizedAsset), false);
+  assert.strictEqual(canCleanTranscript(currentOrg), true);
+});
+
+test('12b. INDIVIDUAL workspace owner sees permitted admin actions in own workspace', () => {
+  const currentOrg = { organization_id: 'org-ind-1', role: 'INDIVIDUAL' };
+  const rawAsset = { id: 'asset-1', media_type: 'AUDIO', is_raw_deleted: false };
+  const normalizedAsset = { id: 'asset-2', media_type: 'NORMALIZED_AUDIO', is_raw_deleted: false };
+
+  const isWorkspaceAdmin = (org) => org?.role === 'ORG_ADMIN' || org?.role === 'INDIVIDUAL';
+  const canDeleteRaw = (org, asset) => isWorkspaceAdmin(org) && asset.media_type !== 'NORMALIZED_AUDIO';
+  const canCleanTranscript = (org) => isWorkspaceAdmin(org);
 
   assert.strictEqual(canDeleteRaw(currentOrg, rawAsset), true);
   assert.strictEqual(canDeleteRaw(currentOrg, normalizedAsset), false);
@@ -475,8 +490,9 @@ test('13. MEMBER does not see admin actions (Delete Raw, Clean) but retains stan
   const currentOrg = { organization_id: 'org-1', role: 'MEMBER' };
   const rawAsset = { id: 'asset-1', media_type: 'AUDIO', is_raw_deleted: false };
 
-  const canDeleteRaw = (org, asset) => org?.role === 'ORG_ADMIN' && asset.media_type !== 'NORMALIZED_AUDIO';
-  const canCleanTranscript = (org) => org?.role === 'ORG_ADMIN';
+  const isWorkspaceAdmin = (org) => org?.role === 'ORG_ADMIN' || org?.role === 'INDIVIDUAL';
+  const canDeleteRaw = (org, asset) => isWorkspaceAdmin(org) && asset.media_type !== 'NORMALIZED_AUDIO';
+  const canCleanTranscript = (org) => isWorkspaceAdmin(org);
   const canRedactTranscript = (org) => Boolean(org);
   const canProcessBothTranscript = (org) => Boolean(org);
 

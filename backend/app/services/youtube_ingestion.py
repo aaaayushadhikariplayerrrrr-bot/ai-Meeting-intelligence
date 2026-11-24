@@ -22,7 +22,8 @@ def extract_youtube_stream(
     youtube_url: str,
     output_dir: Path,
     confirmed_authorization: bool = False,
-    raw_asset_id: Optional[str] = None
+    raw_asset_id: Optional[str] = None,
+    progress_hook: Optional[Any] = None,
 ) -> Tuple[Path, Path, Dict[str, Any], MediaMetadata, str]:
     """Ingest audio stream from user-provided YouTube URL using yt-dlp.
     
@@ -93,6 +94,18 @@ def extract_youtube_stream(
         "ignoreerrors": False,
         "geo_bypass": False,
     }
+
+    if progress_hook:
+        def _hook(d):
+            if d.get("status") == "downloading":
+                total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
+                downloaded = d.get("downloaded_bytes") or 0
+                if total > 0:
+                    try:
+                        progress_hook((downloaded / total) * 100.0)
+                    except Exception:
+                        pass
+        ydl_opts["progress_hooks"] = [_hook]
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
