@@ -503,11 +503,6 @@ ai-Meeting-intelligence/
 
 ---
 
-## Contributors and License
-
-### Contributors
-- **Ayush Adhikari** ([@aaaayushadhikariplayerrrrr-bot](https://github.com/aaaayushadhikariplayerrrrr-bot)) – Project Author & Maintainer
-- **Gurpreet** ([@Gurpreet054](https://github.com/Gurpreet054)) – Contributor
 
 ### License
 All rights reserved by the original authors. Unauthorized commercial distribution, modification, or hosting of this software without explicit permission is prohibited. For licensing inquiries, contact the repository maintainers.
