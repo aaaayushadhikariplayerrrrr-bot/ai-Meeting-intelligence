@@ -2558,28 +2558,7 @@ export const App: React.FC = () => {
                             return (
                               <div className="transcript-version-box">
                                 {/* Version Selector Tabs & Intelligence Action Bar */}
-                                <div className="transcript-toolbar">
-                                  <div className="version-tabs-group">
-                                    <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#94a3b8', marginRight: '0.3rem' }}>
-                                      Versions ({transcripts.length}):
-                                    </span>
-                                    {transcripts.map((t) => {
-                                      const isRedactedType = t.transcript_type === 'CLEANED_REDACTED' || t.transcript_type === 'REDACTED';
-                                      return (
-                                        <button
-                                          key={t.id}
-                                          className={`version-tab-btn ${t.id === activeTranscript.id ? 'active' : ''} ${t.transcript_type.toLowerCase()}`}
-                                          onClick={() => setSelectedVersionMap((prev) => ({ ...prev, [meeting.id]: t.id }))}
-                                          title={isRedactedType ? 'Privacy-Safe Redacted Version' : 'Contains Unredacted Sensitive Data'}
-                                        >
-                                          <span className="v-tag">{t.transcript_type}</span>
-                                          <span className="v-num">v{t.version}</span>
-                                          {t.is_primary && <span className="v-primary-dot" title="Primary ASR Record" />}
-                                        </button>
-                                      );
-                                    })}
-                                  </div>
-
+                                <div className="transcript-toolbar" style={{ justifyContent: 'flex-end' }}>
                                   {/* Intelligence & Privacy Derivation Actions */}
                                   <div className="derivation-actions-row">
                                     {isWorkspaceAdmin && (
@@ -2680,45 +2659,6 @@ export const App: React.FC = () => {
                                 {/* Active Transcript Details Header */}
                                 <div className="transcript-metadata-bar">
                                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
-                                    <span className="transcript-badge">
-                                      {activeTranscript.transcript_type} v{activeTranscript.version}
-                                    </span>
-                                    {isActivePrivacySafe ? (
-                                      <span style={{
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        gap: '0.3rem',
-                                        padding: '0.15rem 0.5rem',
-                                        borderRadius: '4px',
-                                        fontSize: '0.72rem',
-                                        fontWeight: 600,
-                                        background: 'rgba(16, 185, 129, 0.15)',
-                                        color: '#34d399',
-                                        border: '1px solid rgba(16, 185, 129, 0.3)'
-                                      }}>
-                                        <Shield size={11} /> Privacy-Safe (Redacted)
-                                      </span>
-                                    ) : (
-                                      <span style={{
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        gap: '0.3rem',
-                                        padding: '0.15rem 0.5rem',
-                                        borderRadius: '4px',
-                                        fontSize: '0.72rem',
-                                        fontWeight: 600,
-                                        background: 'rgba(239, 68, 68, 0.15)',
-                                        color: '#f87171',
-                                        border: '1px solid rgba(239, 68, 68, 0.3)'
-                                      }}>
-                                        <AlertTriangle size={11} /> Unredacted Version
-                                      </span>
-                                    )}
-                                    {activeTranscript.parent_transcript_id && (
-                                      <span className="parent-link-badge">
-                                        Derived from Source
-                                      </span>
-                                    )}
                                     <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>
                                       Language:{' '}
                                       <strong style={{ color: '#e2e8f0' }}>
